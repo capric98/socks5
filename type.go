@@ -2,9 +2,9 @@ package socks5
 
 import (
 	"context"
+	"net"
 	"sync"
-
-	"github.com/panjf2000/gnet"
+	"time"
 )
 
 const (
@@ -35,24 +35,34 @@ const (
 )
 
 const (
-	HELLO   = 0
-	AUTH    = 1
-	REQUEST = 2
+	REPSUCCESS byte = iota
+	NORMALFAIL
+	_
+	NET_UNREACHABLE
+	HOST_UNREACHABLE
+	REFUSED
+	TIMEOUT
 
 	INFOLOG = "Info:"
 	WARNLOG = "Warn:"
 	FTALLOG = "Fatal:"
 )
 
+// type Frame struct {
+// 	Ack  func()
+// 	B    []byte
+// 	next *Frame
+// }
+
 type Logger interface {
 	Println(...interface{})
 	Fatal(...interface{})
 }
 
-type queue struct {
-	ring               [][]byte
-	head, tail, maxLen int
-}
+// type queue struct {
+// 	head, tail *Frame
+// 	qlen       int32
+// }
 
 type Request struct {
 	CMD      byte
@@ -61,37 +71,24 @@ type Request struct {
 	DST_ADDR []byte
 	DST_PORT uint16
 
-	conn     *sConn
-	status   int
-	approved bool
+	clt, srv net.Conn
+	ctx      context.Context
+	cancel   func()
 	logger   Logger
 }
 
-type sConn struct {
-	c       gnet.Conn
-	q       *queue
-	residue []byte
-
-	wake   chan struct{}
-	ctx    context.Context
-	cancel func()
-}
-
 type Server struct {
-	Addr        string
-	Port        uint16
-	NetType     string
-	Multicore   bool
-	MaxQueueLen int
+	Addr    string
+	Port    uint16
+	NetType string
 
-	Logger Logger
+	Auth  bool
+	Ident map[string]string
 
-	*gnet.EventServer
-	//pool *goroutine.Pool
+	TimeOut time.Duration
+	Logger  Logger
 
-	ctx  context.Context
-	mu   sync.Mutex
-	rMap map[gnet.Conn]*Request
-
+	ctx context.Context
+	mu  sync.Mutex
 	req chan *Request
 }

@@ -2,199 +2,174 @@ package socks5
 
 import (
 	"context"
+	"errors"
 	"io"
-	"log"
 	"net"
 	"strconv"
-
-	"github.com/panjf2000/gnet"
+	"time"
 )
 
-func (s *Server) Listen() {
+func (s *Server) Listen() error {
 	s.init()
+
+	l, err := net.Listen(s.NetType, s.Addr+":"+strconv.Itoa(int(s.Port)))
+	if err != nil {
+		s.Logger.Fatal(err)
+		return err
+	}
 	go func() {
-		s.Logger.Fatal(gnet.Serve(s, s.NetType+"://"+s.Addr+":"+strconv.Itoa(int(s.Port)), gnet.WithMulticore(s.Multicore)))
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				conn, err := l.Accept()
+				if err != nil {
+					s.Logger.Println(WARNLOG, "net Accept:", err)
+					continue
+				}
+				go s.handle(conn)
+			}
+		}
 	}()
+	return nil
 }
 
 func (s *Server) Accept() *Request {
 	return <-s.req
 }
 
-func (r *Request) Success(conn net.Conn) {
-	oldReply(r, conn)
-	go r.pipe(conn)
-}
+func (s *Server) handle(conn net.Conn) {
+	var e error
+	var n int
 
-func (r *Request) Fail(e error) {
-	r.Error(e)
-}
+	defer func() {
+		if e != nil {
+			s.Logger.Println(INFOLOG, conn.RemoteAddr().String, "raised an error", e)
+			conn.Close()
+		}
+	}()
 
-func (r *Request) Error(e error) {
-	r.logger.Println(INFOLOG, "Connection from", r.conn.c.RemoteAddr(), "raised an error:", e)
-}
+	one := make([]byte, 1)
 
-func (s *Server) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	s.Logger.Println(INFOLOG, "Start listening", s.NetType, srv.Addr.String(), "withMulticore", srv.Multicore, ".")
-	return
-}
+	// We will cancel this deadline in (*Request)Success method.
+	_ = conn.SetDeadline(time.Now().Add(s.TimeOut))
+	if _, e = conn.Read(one); e != nil {
+		return
+	}
+	if one[0] != VERSION {
+		e = errors.New("Wrong socks version!")
+		return
+	}
+	if _, e = conn.Read(one); e != nil {
+		return
+	}
 
-func (s *Server) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
-	s.Logger.Println(INFOLOG, "New connection from", c.RemoteAddr())
+	clientMethods := make([]byte, int(one[0]))
+	if _, e = conn.Read(clientMethods); e != nil {
+		return
+	}
 
-	r := &Request{
-		conn: &sConn{
-			c: c,
-			q: &queue{
-				head:   0,
-				tail:   0,
-				maxLen: s.MaxQueueLen,
-				ring:   make([][]byte, s.MaxQueueLen),
-			},
-			wake: make(chan struct{}),
-		},
+	reply := []byte{VERSION, NOACCEPT}
+	if s.Auth {
+		for i := 0; i < int(one[0]); i++ {
+			if clientMethods[i] == PSSWD {
+				reply[1] = PSSWD
+				break
+			}
+		}
+	} else {
+		for i := 0; i < int(one[0]); i++ {
+			if clientMethods[i] == NOAUTH {
+				reply[1] = NOAUTH
+				break
+			}
+		}
+	}
+
+	if n, e = conn.Write(reply); e != nil {
+		return
+	}
+	if n != 2 {
+		e = io.ErrShortWrite
+		return
+	}
+	if reply[1] == NOACCEPT {
+		e = io.EOF
+		return
+	}
+
+	if s.Auth {
+		// TODO: authentication
+		if s.auth(conn) {
+			if n, e := conn.Write([]byte{VERSION, 0}); e != nil || n != 2 {
+				conn.Close()
+				return
+			}
+		} else {
+			_, _ = conn.Write([]byte{VERSION, 1})
+			conn.Close()
+			return
+		}
+	}
+
+	// Handle CMD
+	cmdHead := make([]byte, 4)
+	if _, e = conn.Read(cmdHead); e != nil {
+		return
+	}
+	if cmdHead[0] != VERSION {
+		e = errors.New("Wrong socks version!")
+		return
+	}
+	// No support for BIND yet.
+	if cmdHead[1] == 2 {
+		e = errors.New("DO NOT SUPPORT BIND")
+		return
+	}
+	req := &Request{
+		CMD:  cmdHead[1],
+		RSV:  cmdHead[2],
+		ATYP: cmdHead[3],
+
+		clt:    conn,
 		logger: s.Logger,
 	}
-	for i := 0; i < s.MaxQueueLen; i++ {
-		r.conn.q.ring[i] = make([]byte, 0, 100)
+	var residue int
+	switch req.ATYP {
+	case ATYPIPv4:
+		residue = 6
+	case ATYPIPv6:
+		residue = 18
+	case ATYPDOMAIN:
+		if _, e = conn.Read(one); e != nil {
+			return
+		}
+		residue = int(one[0]) + 2
 	}
-	r.conn.ctx, r.conn.cancel = context.WithCancel(s.ctx)
-	s.rMap[c] = r
-
-	return
-}
-
-func (s *Server) OnClosed(c gnet.Conn, e error) (action gnet.Action) {
-	req := s.rMap[c]
-	req.conn.cancel()
-
-	s.mu.Lock()
-	delete(s.rMap, c)
-	s.mu.Unlock()
-
-	if e != nil && e != io.EOF {
-		s.Logger.Println(WARNLOG, "Connection from", c.RemoteAddr(), "was closed by error:", e)
-	}
-	return
-}
-
-func (s *Server) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-	req := s.rMap[c]
-
-	select {
-	case <-req.conn.ctx.Done():
-		action = gnet.Close
+	resb := make([]byte, residue)
+	if _, e = conn.Read(resb); e != nil {
 		return
-	default:
-		if len(frame) == 0 {
-			return
-		}
 	}
-
-	if req.approved {
-		tmp := req.conn.q.tail
-		req.conn.q.ring[tmp] = append(req.conn.q.ring[tmp], frame...)
-		tmp++
-		if tmp == req.conn.q.maxLen {
-			tmp = 0
-		}
-		if tmp == req.conn.q.head {
-			s.Logger.Println(WARNLOG, "Connection from", c.RemoteAddr(), "queue overflow.")
-			action = gnet.Close
-			return
-		}
-		req.conn.q.tail = tmp
-		select {
-		case req.conn.wake <- struct{}{}:
-		default:
-		}
-		// if frame[0] == 5 && frame[1] == 1 && frame[2] == 0 {
-		// 	s.Logger.Println("In normal:", frame)
-		// }
-	} else {
-		if len(frame) < 3 {
-			action = gnet.Close
-			return
-		}
-		if frame[0] != 5 {
-			// Only support socks5 protocol.
-			action = gnet.Close
-		}
-		if req.status == HELLO {
-			if 2+int(frame[1]) != len(frame) {
-				action = gnet.Close
-				return
-			}
-			for i := 2; i < len(frame); i++ {
-				if frame[i] == 0 {
-					out = []byte{5, 0}
-					req.status = REQUEST
-				}
-			}
-			// s.Logger.Println("Client hello.")
-			// s.Logger.Println(frame)
-			// s.Logger.Println(out)
-			return
-		}
-		if req.status == REQUEST {
-			if len(frame) < 10 {
-				action = gnet.Close
-				return
-			}
-
-			req.CMD = frame[1]
-			req.RSV = frame[2]
-			req.ATYP = frame[3]
-
-			var pos int
-			switch req.ATYP {
-			case 1:
-				pos = 8
-			case 4:
-				pos = 20
-			case 3:
-				pos = 4 + int(frame[4])
-				frame = frame[1:]
-			default:
-				action = gnet.Close
-				return
-			}
-
-			if len(frame) != pos+2 {
-				action = gnet.Close
-				return
-			}
-			req.DST_ADDR = append([]byte{}, frame[4:pos]...)
-			req.DST_PORT = uint16(frame[pos])<<8 + uint16(frame[pos+1])
-
-			req.approved = true
-			s.req <- req
-		}
-	}
-
-	return
+	req.DST_PORT = uint16(resb[residue-2])<<8 + uint16(resb[residue-1])
+	req.DST_ADDR = resb[:residue-2]
+	req.ctx, req.cancel = context.WithCancel(s.ctx)
+	s.req <- req
 }
 
-func oldReply(r *Request, conn net.Conn) {
-	resp := []byte{5, 0, 0}
-	var remoteAddr net.IP
-	var remotePort uint16
-	switch addr := conn.RemoteAddr().(type) {
-	case *net.UDPAddr:
-		remoteAddr = addr.IP
-		remotePort = uint16(addr.Port)
-	case *net.TCPAddr:
-		remoteAddr = addr.IP
-		remotePort = uint16(addr.Port)
+func (s *Server) auth(conn net.Conn) bool {
+	head := make([]byte, 2)
+	if n, e := conn.Read(head); n != 2 || e != nil || head[0] != 1 {
+		return false
+	}
+	userbyte := make([]byte, int(head[1])+1)
+	if n, e := conn.Read(userbyte); n != int(head[1])+1 || e != nil {
+		return false
+	}
+	password := make([]byte, int(userbyte[int(head[1])]))
+	if n, e := conn.Read(password); n != int(userbyte[int(head[1])]) || e != nil {
+		return false
 	}
 
-	if remoteAddr.To4() != nil {
-		resp = append(append(resp, 1), []byte(remoteAddr.To4())...)
-	} else {
-		resp = append(append(resp, 4), []byte(remoteAddr.To16())...)
-	}
-	resp = append(resp, byte(remotePort>>8), byte(remotePort%256))
-
-	log.Println("Success Resp:", resp)
-	_, _ = r.conn.Write(resp)
+	return s.Ident[string(userbyte[:int(head[1])])] == string(password)
 }

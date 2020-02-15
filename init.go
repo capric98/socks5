@@ -3,20 +3,21 @@ package socks5
 import (
 	"context"
 	"sync"
-
-	"github.com/panjf2000/gnet"
+	"time"
 )
 
 func (s *Server) init() {
 	if s.NetType == "" {
 		s.NetType = "tcp"
 	}
-	if s.MaxQueueLen <= 0 {
-		s.MaxQueueLen = 1200
+	if s.Auth && s.Ident == nil {
+		s.Ident = make(map[string]string)
+	}
+	if s.TimeOut == 0 {
+		s.TimeOut = time.Minute
 	}
 
 	s.ctx = context.Background()
 	s.mu = sync.Mutex{}
-	s.rMap = make(map[gnet.Conn]*Request)
 	s.req = make(chan *Request, 65535)
 }
