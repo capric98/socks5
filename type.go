@@ -48,11 +48,10 @@ const (
 	FTALLOG = "Fatal:"
 )
 
-// type Frame struct {
-// 	Ack  func()
-// 	B    []byte
-// 	next *Frame
-// }
+type frame struct {
+	b []byte
+	n int
+}
 
 type Logger interface {
 	Println(...interface{})
