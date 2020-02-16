@@ -85,8 +85,9 @@ func main() {
 			pl, e := net.ListenPacket("udp", ":")
 			if e != nil {
 				req.FailUDP(e)
+			} else {
+				req.SuccessUDP(pl)
 			}
-			req.SuccessUDP(pl)
 		default:
 			continue
 		}
