@@ -1,6 +1,7 @@
 # socks5
 
 **A simple socks5 server written in Go.**
+
 Not fully tested yet.
 
 ## Features
@@ -50,7 +51,7 @@ func main() {
 
 	// If you would like to accept UDP replying:
 	//
-	s.AllowUDP = true
+	// s.AllowUDP = true
 	// (optional) s.RewriteBND = YourPublicIP
 
 	if e := s.Listen(); e != nil {
