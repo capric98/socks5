@@ -10,20 +10,41 @@ import (
 )
 
 func main() {
-	// m := make(map[string]string)
-	// m["test"] = "abc"
+	listen("tcp", "127.0.0.1")
+	//listen("tcp", "[::1]")
+	//listen("")
+}
+
+func listen(nt string, addr string) {
+	// id := make(map[string]string)
+	// id["username"] = "password!"
 	s := &socks5.Server{
-		Addr:   "127.0.0.1",
+		Addr:   addr,
 		Port:   9595,
 		Logger: socks5.DefaultLogger{},
-		// Ident:  m,
+		// Ident:  id,
 		// Auth:   true,
+		AllowUDP: true,
 	}
 	if e := s.Listen(); e != nil {
 		log.Fatal(e)
 	}
 	for {
 		req := s.Accept()
+
+		if req.CMD == socks5.ASSOCIATE {
+			pl, e := net.ListenPacket("udp", ":")
+			if e != nil {
+				log.Fatal(e)
+			}
+			req.SuccessUDP(pl)
+			continue
+		}
+
+		// Test SuccessUDP CONNECT rather than Success
+		// pl, _ := net.ListenPacket("udp", ":")
+		// req.SuccessUDP(pl)
+		// continue
 
 		var DST string
 		if req.ATYP == 3 {
@@ -34,9 +55,17 @@ func main() {
 			DST = (net.IP(req.DST_ADDR)).String()
 		}
 
+		// Test Success ASSOCIATE rather than SuccessUDP
+		// if DST == "" || DST == "0.0.0.0" {
+		// 	DST = "www.baidu.com"
+		// }
+		// if req.DST_PORT == 0 {
+		// 	req.DST_PORT = 443
+		// }
+
 		go func() {
 			now := time.Now()
-			conn, err := net.DialTimeout(s.NetType, DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
+			conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
 			log.Println("Dial cost", time.Since(now).String())
 
 			if err != nil {

@@ -37,11 +37,12 @@ const (
 const (
 	REPSUCCESS byte = iota
 	NORMALFAIL
-	_
+	RULEFAIL
 	NET_UNREACHABLE
 	HOST_UNREACHABLE
 	REFUSED
 	TIMEOUT
+	NOSUPPORT
 
 	INFOLOG = "Info:"
 	WARNLOG = "Warn:"
@@ -74,12 +75,24 @@ type Request struct {
 	ctx      context.Context
 	cancel   func()
 	logger   Logger
+
+	udpAck chan net.PacketConn
 }
 
 type Server struct {
-	Addr    string
-	Port    uint16
-	NetType string
+	Addr     string
+	Port     uint16
+	AllowUDP bool
+
+	// This field is only available when AllowUDP is true,
+	// and the server is behind a NAT network, with all
+	// its UDP ports forwarded, and serving ASSOCIATE CMD
+	// from clients who are not in the same intranet as the
+	// server.
+	// In this situation, you will want to rewrite BND.ADDR
+	// in server's reply message in order to make clients
+	// able to send UDP packet to BND.ADDR:BND.PORT.
+	RewriteBND net.IP
 
 	Auth  bool
 	Ident map[string]string
@@ -87,7 +100,8 @@ type Server struct {
 	TimeOut time.Duration
 	Logger  Logger
 
-	ctx context.Context
-	mu  sync.Mutex
-	req chan *Request
+	ctx  context.Context
+	stop func()
+	mu   sync.Mutex
+	req  chan *Request
 }

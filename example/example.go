@@ -1,25 +1,3 @@
-# socks5
-
-**A simple socks5 server written in Go.**
-Not fully tested yet.
-
-## Features
-* CMD
-  * - [x] CONNECT
-  * - [ ] BIND
-  * - [x] ASSOCIATE
-* Identifier/Method
-  * - [x] No Auth
-  * - [ ] GSSAPI
-  * - [x] Username/Password
-  * - [ ] IANA Assigned
-  * - [ ] Reservered for Private Methods
-  * - [x] No Accept : )
-* Miscellaneous
-  * - [ ] REASSEMBLY QUEUE / REASSEMBLY TIMER
-
-## Usage
-```golang
 package main
 
 import (
@@ -91,6 +69,3 @@ func main() {
 		}
 	}
 }
-```
-
-### LESS IS MORE

@@ -12,7 +12,7 @@ import (
 func (s *Server) Listen() error {
 	s.init()
 
-	l, err := net.Listen(s.NetType, s.Addr+":"+strconv.Itoa(int(s.Port)))
+	l, err := net.Listen("tcp", s.Addr+":"+strconv.Itoa(int(s.Port)))
 	if err != nil {
 		s.Logger.Fatal(err)
 		return err
@@ -21,9 +21,11 @@ func (s *Server) Listen() error {
 		for {
 			select {
 			case <-s.ctx.Done():
+				_ = l.Close()
 				return
 			default:
 				conn, err := l.Accept()
+				s.Logger.Println(INFOLOG, "Accept the connection from", conn.RemoteAddr())
 				if err != nil {
 					s.Logger.Println(WARNLOG, "net Accept:", err)
 					continue
@@ -39,6 +41,10 @@ func (s *Server) Accept() *Request {
 	return <-s.req
 }
 
+func (s *Server) Shutdown() {
+	s.stop()
+}
+
 func (s *Server) handle(conn net.Conn) {
 	var e error
 	var n int
@@ -52,7 +58,8 @@ func (s *Server) handle(conn net.Conn) {
 
 	one := make([]byte, 1)
 
-	// We will cancel this deadline in (*Request)Success method.
+	// We will cancel this deadline in (*Request).Success method.
+	// Remember to cancel in (*Server).handleUDP too.
 	_ = conn.SetDeadline(time.Now().Add(s.TimeOut))
 	if _, e = conn.Read(one); e != nil {
 		return
@@ -122,11 +129,7 @@ func (s *Server) handle(conn net.Conn) {
 		e = errors.New("Wrong socks version!")
 		return
 	}
-	// No support for BIND yet.
-	if cmdHead[1] == 2 {
-		e = errors.New("DO NOT SUPPORT BIND")
-		return
-	}
+
 	req := &Request{
 		CMD:  cmdHead[1],
 		RSV:  cmdHead[2],
@@ -154,6 +157,26 @@ func (s *Server) handle(conn net.Conn) {
 	req.DST_PORT = uint16(resb[residue-2])<<8 + uint16(resb[residue-1])
 	req.DST_ADDR = resb[:residue-2]
 	req.ctx, req.cancel = context.WithCancel(s.ctx)
+
+	switch cmdHead[1] {
+	case CONNECT:
+	case ASSOCIATE:
+		if !s.AllowUDP {
+			e = errors.New("Do not support ASSOCIATE due to rule set.")
+			_, _ = conn.Write([]byte{VERSION, RULEFAIL, RSV, ATYPIPv4, 0, 0, 0, 0, 0, 0})
+			return
+		} else {
+			req.udpAck = make(chan net.PacketConn)
+			go s.handleUDP(req)
+		}
+	default:
+		// No support for BIND yet.
+		e = errors.New("Unknown CMD:" + string(cmdHead[1:1]))
+		_, _ = conn.Write([]byte{VERSION, NOSUPPORT, RSV, ATYPIPv4, 0, 0, 0, 0, 0, 0})
+		return
+	}
+
+	req.watch()
 	s.req <- req
 }
 
@@ -172,4 +195,118 @@ func (s *Server) auth(conn net.Conn) bool {
 	}
 
 	return s.Ident[string(userbyte[:int(head[1])])] == string(password)
+}
+
+func (s *Server) handleUDP(req *Request) {
+	defer func() { _ = recover() }()
+
+	conn := req.clt
+	defer conn.Close()
+	if _, ok := conn.(*net.TCPConn); !ok {
+		return
+	}
+	spl := <-req.udpAck
+	if spl == nil {
+		return
+	}
+
+	pl, e := net.ListenPacket("udp", s.Addr+":")
+	if e != nil {
+		_, _ = conn.Write([]byte{VERSION, NORMALFAIL, RSV, ATYPIPv4, 0, 0, 0, 0, 0, 0})
+		conn.Close()
+		return
+	}
+	defer pl.Close()
+
+	laddr := pl.LocalAddr()
+	if s.RewriteBND != nil {
+		// Rewrite
+		port := laddr.(*net.UDPAddr).Port
+		laddr = net.Addr(&net.UDPAddr{
+			IP:   s.RewriteBND,
+			Port: port,
+		})
+	}
+	resp := genResp(laddr)
+
+	if n, e := conn.Write(resp); n != len(resp) || e != nil {
+		s.Logger.Println(INFOLOG, conn.RemoteAddr(), "was expected to write", len(resp), "but wrote", n, "bytes with err", e)
+		conn.Close()
+		return
+	}
+	// Cancel Deadline
+	_ = conn.SetDeadline(time.Time{})
+
+	addrChan := make(chan net.Addr, 10)
+	defer close(addrChan)
+
+	go func() {
+		defer func() { _ = recover() }()
+		buffer := make([]byte, 16*1024)
+		var n int
+		var re, we error
+
+		taddr := <-addrChan
+
+		head := append([]byte{0, 0, 0}, resp[3:]...)
+		headlen := len(head)
+
+		for re == nil && we == nil {
+			_ = spl.SetReadDeadline(time.Now().Add(s.TimeOut))
+			_ = pl.SetWriteDeadline(time.Now().Add(s.TimeOut))
+			n, _, re = spl.ReadFrom(buffer)
+
+			head = append(head, buffer[:n]...)
+
+			select {
+			case taddr = <-addrChan:
+				if taddr == nil {
+					return
+				}
+			default:
+			}
+			_, we = pl.WriteTo(head, taddr)
+			head = head[:headlen]
+		}
+	}()
+
+	buffer := make([]byte, 16*1024)
+	var n, domainEnd int
+	var re, we error
+	var caddr, raddr net.Addr
+	for we == nil && re == nil {
+		_ = pl.SetReadDeadline(time.Now().Add(s.TimeOut))
+		_ = spl.SetWriteDeadline(time.Now().Add(s.TimeOut))
+		n, caddr, re = pl.ReadFrom(buffer)
+
+		if !caddr.(*net.UDPAddr).IP.Equal(conn.RemoteAddr().(*net.TCPAddr).IP) {
+			continue
+		}
+		if buffer[0]+buffer[1]+buffer[2] != 0 {
+			continue
+		}
+		select {
+		case addrChan <- caddr:
+		default:
+		}
+
+		switch buffer[3] {
+		case ATYPIPv4:
+			_, we = spl.WriteTo(buffer[10:n], &net.UDPAddr{
+				IP:   net.IP(buffer[4:8]),
+				Port: int(buffer[8])<<8 + int(buffer[9]),
+			})
+		case ATYPIPv6:
+			_, we = spl.WriteTo(buffer[22:n], &net.UDPAddr{
+				IP:   net.IP(buffer[4:20]),
+				Port: int(buffer[20])<<8 + int(buffer[21]),
+			})
+		case ATYPDOMAIN:
+			domainEnd = 5 + int(buffer[4])
+			raddr, _ = net.ResolveUDPAddr("udp", string(buffer[5:domainEnd])+":"+strconv.Itoa(int(buffer[domainEnd])<<8+int(buffer[domainEnd+1])))
+			_, we = spl.WriteTo(buffer[domainEnd+2:n], raddr)
+		default:
+			return
+		}
+	}
 }
