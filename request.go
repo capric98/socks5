@@ -44,12 +44,6 @@ func (r *Request) Fail(e error) {
 func (r *Request) succCONNECT(conn net.Conn) {
 	r.srv = conn
 
-	if r.CMD != CONNECT {
-		r.logger.Println(WARNLOG, "Request from", r.clt.RemoteAddr(), "is not a CONNECT CMD.", "("+strconv.Itoa(int(r.CMD))+")")
-		r.cancel()
-		return
-	}
-
 	resp := genResp(r.clt.LocalAddr())
 
 	if n, e := r.clt.Write(resp); n != len(resp) || e != nil {
@@ -63,14 +57,10 @@ func (r *Request) succCONNECT(conn net.Conn) {
 }
 
 func (r *Request) succASSOCIATE(pl net.PacketConn) {
-	if r.CMD != ASSOCIATE {
-		r.Fail(errors.New(INFOLOG + " Request from " + r.clt.RemoteAddr().String() + " is not an ASSOCIATE CMD." + " (" + strconv.Itoa(int(r.CMD)) + ")"))
-	} else {
-		// Cancel Deadline
-		_ = r.clt.SetDeadline(time.Time{})
+	// Cancel Deadline
+	_ = r.clt.SetDeadline(time.Time{})
 
-		r.udpAck <- pl
-	}
+	r.udpAck <- pl
 }
 
 func (r *Request) watch() {
