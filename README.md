@@ -2,8 +2,6 @@
 
 **A simple socks5 server written in Go.**
 
-Not fully tested yet.
-
 ## Features
 * CMD
   * - [x] CONNECT
