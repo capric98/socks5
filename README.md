@@ -18,6 +18,23 @@
   * - [ ] REASSEMBLY QUEUE / REASSEMBLY TIMER
 
 ## Usage
+* New a `Server`
+  * `Addr`: Server will listen this address.
+  * `Port`: Server will bind to this port.
+  * `AllowUDP`: If this was set to `false`, you would only get `CONNECT` requests from `(*Server).Accept()`
+  * `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/type.go#L81).
+  * `Auth`: If this was set to `true`, the Server would force clients to use Username and Password to proof their identities.
+  * `Ident`: A `map[string]string` which stores Username and Password pairs.
+  * `Logger`: An `interface{}` which implements `Println()` and `Fatal()`.
+  * `TimeOut`: The connection to the Server will timeout if its `*Request` fails to `Success` or `Fail` in `TimeOut` time.
+* `(*Server).Listen()`
+* Keep `(*Server).Accept()`, and handle every `*Request`:
+  * By default, you need to implement an interface which could be converted to `net.Conn`.
+  * If you'd like to handle ASSOCIATE (UDP relying) requests, you need to implement an interface which could be converted to `net.PacketConn`.
+  * Use `(*Request).Success()` or `(*Request).Fail()` to handle a `*Request`.
+
+## Example
+This is a very simple example which uses default `net.Conn` and `net.PacketConn` to handle `*Request`. Please notice that in this example, ASSOCIATE requests will be refused since `s.AllowUDP` has a default `false` value and `s.AllowUDP = true` is commented.
 ```golang
 package main
 
