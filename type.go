@@ -3,7 +3,6 @@ package socks5
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -59,11 +58,6 @@ type Logger interface {
 	Fatal(...interface{})
 }
 
-// type queue struct {
-// 	head, tail *Frame
-// 	qlen       int32
-// }
-
 type Request struct {
 	CMD      byte
 	RSV      byte
@@ -92,6 +86,13 @@ type Server struct {
 	// In this situation, you will want to rewrite BND.ADDR
 	// in server's reply message in order to make clients
 	// able to send UDP packet to BND.ADDR:BND.PORT.
+	//
+	// There is another situation, that you do not specify
+	// Addr, in this case, "net" will listen [::] by default,
+	// result in ASSOCIATE response be:
+	// byte: {5 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 rand rand}
+	// Clients will consider this kind of response as invalid,
+	// so you'd better appoint RewriteBND mannually to avoid this.
 	RewriteBND net.IP
 
 	Auth  bool
@@ -102,6 +103,6 @@ type Server struct {
 
 	ctx  context.Context
 	stop func()
-	mu   sync.Mutex
-	req  chan *Request
+
+	req chan *Request
 }

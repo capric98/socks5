@@ -17,6 +17,7 @@ func (s *Server) Listen() error {
 		s.Logger.Fatal(err)
 		return err
 	}
+	s.Logger.Println(INFOLOG, "Start listening", l.Addr())
 	go func() {
 		for {
 			select {
@@ -137,6 +138,7 @@ func (s *Server) handle(conn net.Conn) {
 
 		clt:    conn,
 		logger: s.Logger,
+		udpAck: make(chan net.PacketConn),
 	}
 	var residue int
 	switch req.ATYP {
@@ -166,7 +168,6 @@ func (s *Server) handle(conn net.Conn) {
 			_, _ = conn.Write([]byte{VERSION, RULEFAIL, RSV, ATYPIPv4, 0, 0, 0, 0, 0, 0})
 			return
 		} else {
-			req.udpAck = make(chan net.PacketConn)
 			go s.handleUDP(req)
 		}
 	default:
@@ -228,14 +229,13 @@ func (s *Server) handleUDP(req *Request) {
 		})
 	}
 	resp := genResp(laddr)
+	//s.Logger.Println(INFOLOG, "ASSOCIATE response:", resp)
 
 	if n, e := conn.Write(resp); n != len(resp) || e != nil {
 		s.Logger.Println(INFOLOG, conn.RemoteAddr(), "was expected to write", len(resp), "but wrote", n, "bytes with err", e)
 		conn.Close()
 		return
 	}
-	// Cancel Deadline
-	_ = conn.SetDeadline(time.Time{})
 
 	addrChan := make(chan net.Addr, 10)
 	defer close(addrChan)

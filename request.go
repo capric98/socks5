@@ -5,13 +5,43 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
+func (r *Request) Success(i interface{}) {
+	switch r.CMD {
+	case CONNECT:
+		conn, ok := i.(net.Conn)
+		if ok {
+			r.succCONNECT(conn)
+		} else {
+			r.Fail(errors.Errorf("CONNECT got %T rather than net.Conn .", i))
+		}
+	case ASSOCIATE:
+		pl, ok := i.(net.PacketConn)
+		if ok {
+			r.succASSOCIATE(pl)
+		} else {
+			r.Fail(errors.Errorf("ASSOCIATE got %T rather than net.PacketConn .", i))
+		}
+	default:
+		r.Fail(errors.New("CMD(" + strconv.Itoa(int(r.CMD)) + ") unsupported."))
+	}
+}
+
 func (r *Request) Fail(e error) {
+	r.logger.Println(INFOLOG, "Connection from", r.clt.RemoteAddr(), "failed because:", e)
+
+	resp := genResp(r.clt.LocalAddr())
+	resp[1] = NORMALFAIL
+	_, _ = r.clt.Write(resp)
+
+	close(r.udpAck)
 	r.cancel()
 }
 
-func (r *Request) Success(conn net.Conn) {
+func (r *Request) succCONNECT(conn net.Conn) {
 	r.srv = conn
 
 	if r.CMD != CONNECT {
@@ -20,7 +50,7 @@ func (r *Request) Success(conn net.Conn) {
 		return
 	}
 
-	resp := genResp(conn.LocalAddr())
+	resp := genResp(r.clt.LocalAddr())
 
 	if n, e := r.clt.Write(resp); n != len(resp) || e != nil {
 		r.logger.Println(INFOLOG, conn.RemoteAddr(), "was expected to write", len(resp), "byte(s) but wrote", n, "byte(s) with err", e)
@@ -32,19 +62,15 @@ func (r *Request) Success(conn net.Conn) {
 	r.pipe()
 }
 
-func (r *Request) SuccessUDP(pl net.PacketConn) {
+func (r *Request) succASSOCIATE(pl net.PacketConn) {
 	if r.CMD != ASSOCIATE {
-		r.logger.Println(INFOLOG, "Request from", r.clt.RemoteAddr(), "is not an ASSOCIATE CMD.", "("+strconv.Itoa(int(r.CMD))+")")
-		r.cancel()
-		//close(r.udpAck)
+		r.Fail(errors.New(INFOLOG + " Request from " + r.clt.RemoteAddr().String() + " is not an ASSOCIATE CMD." + " (" + strconv.Itoa(int(r.CMD)) + ")"))
 	} else {
+		// Cancel Deadline
+		_ = r.clt.SetDeadline(time.Time{})
+
 		r.udpAck <- pl
 	}
-}
-
-func (r *Request) FailUDP(e error) {
-	r.logger.Println(INFOLOG, "ASSOCIATE from", r.clt.RemoteAddr, "failed because", e)
-	close(r.udpAck)
 }
 
 func (r *Request) watch() {
@@ -68,6 +94,8 @@ func (r *Request) pipe() {
 }
 
 func bufferedCopy(dst, src net.Conn, ctx context.Context, cancel func()) {
+	defer cancel()
+
 	rc := make(chan *frame, 2)
 	wc := make(chan *frame, 2)
 	rc <- &frame{b: make([]byte, 16*1024)}
@@ -83,7 +111,6 @@ func bufferedCopy(dst, src net.Conn, ctx context.Context, cancel func()) {
 			wc <- rf
 			if re != nil {
 				close(wc)
-				cancel()
 				return
 			}
 		}
@@ -91,17 +118,16 @@ func bufferedCopy(dst, src net.Conn, ctx context.Context, cancel func()) {
 
 	for wf = range wc {
 		wn, we = dst.Write(wf.b[:wf.n])
+		rc <- wf
 		if we != nil || wn != wf.n {
 			close(rc)
-			cancel()
 			return
 		}
-		rc <- wf
 	}
 }
 
 func genResp(iaddr net.Addr) []byte {
-	resp := []byte{VERSION, REPSUCCESS, RSV, ATYPIPv4}
+	resp := []byte{VERSION, REPSUCCESS, RSV, RSV}
 
 	var laddr net.IP
 	var port uint16
@@ -115,8 +141,11 @@ func genResp(iaddr net.Addr) []byte {
 	}
 
 	if laddr.To4() != nil {
+		// laddr is an IPv4 address.
+		resp[3] = ATYPIPv4
 		resp = append(resp, laddr.To4()...)
 	} else {
+		// laddr is an IPv6 address.
 		resp[3] = ATYPIPv6
 		resp = append(resp, laddr.To16()...)
 	}

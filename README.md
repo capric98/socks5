@@ -34,11 +34,12 @@ import (
 
 func main() {
 	s := &socks5.Server{
-		Addr:   "127.0.0.1",
-		Port:   1080,
-		Logger: socks5.DefaultNoLogger{},
+		Addr: "127.0.0.1",
+		Port: 1080,
 		// For verbose running, use socks5.DefaultLogger{} instead.
 		// You could also implement your Logger interface if you like :)
+		//
+		// Logger: socks5.DefaultNoLogger{},
 	}
 
 	// If you would like to require an authentication:
@@ -52,6 +53,10 @@ func main() {
 	// If you would like to accept UDP replying:
 	//
 	// s.AllowUDP = true
+	//
+	// Read this to know in what situation you'd
+	// like to appoint RewriteBND:
+	// https://github.com/capric98/socks5/blob/master/type.go#L81
 	// (optional) s.RewriteBND = YourPublicIP
 
 	if e := s.Listen(); e != nil {
@@ -84,9 +89,9 @@ func main() {
 			log.Println("ASSOCIATE:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
 			pl, e := net.ListenPacket("udp", ":")
 			if e != nil {
-				req.FailUDP(e)
+				req.Fail(e)
 			} else {
-				req.SuccessUDP(pl)
+				req.Success(pl)
 			}
 		default:
 			continue
