@@ -60,7 +60,7 @@ func (s *Server) handle(conn net.Conn) {
 
 	defer func() {
 		if e != nil {
-			s.Logger.Println(INFOLOG, conn.RemoteAddr().String, "raised an error", e)
+			s.Logger.Println(INFOLOG, conn.RemoteAddr(), "raised an error", e)
 			conn.Close()
 		}
 	}()
@@ -111,18 +111,18 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 	if reply[1] == NOACCEPT {
-		e = io.EOF
+		conn.Close()
 		return
 	}
 
 	if s.Auth {
-		// TODO: authentication
 		if s.auth(conn) {
 			if n, e := conn.Write([]byte{VERSION, 0}); e != nil || n != 2 {
 				conn.Close()
 				return
 			}
 		} else {
+			s.Logger.Println(INFOLOG, "Connection from", conn.RemoteAddr(), "failed to pass the authentication.")
 			_, _ = conn.Write([]byte{VERSION, 1})
 			conn.Close()
 			return
