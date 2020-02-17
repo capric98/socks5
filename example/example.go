@@ -33,7 +33,7 @@ func main() {
 	//
 	// Read this to know in what situation you'd
 	// like to appoint RewriteBND:
-	// https://github.com/capric98/socks5/blob/master/type.go#L81
+	// https://github.com/capric98/socks5/blob/master/type.go#L84
 	// (optional) s.RewriteBND = YourPublicIP
 
 	if e := s.Listen(); e != nil {

@@ -9,7 +9,14 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Success approves the Request with an interface, the interface
+// MUST be able to be converted to a net.Conn(CONNECT) or a
+// net.PacketConn(ASSOCIATE).
 func (r *Request) Success(i interface{}) {
+	if i == nil {
+		r.Fail(nil)
+	}
+
 	switch r.CMD {
 	case CONNECT:
 		conn, ok := i.(net.Conn)
@@ -30,6 +37,8 @@ func (r *Request) Success(i interface{}) {
 	}
 }
 
+// Fail denies the Request with a given error, the server will write a response
+// of NormalFail message to the client, then close the connection.
 func (r *Request) Fail(e error) {
 	r.logger.Println(INFOLOG, "Connection from", r.clt.RemoteAddr(), "failed because:", e)
 
@@ -39,6 +48,11 @@ func (r *Request) Fail(e error) {
 
 	close(r.udpAck)
 	r.cancel()
+}
+
+// CltAddr returns the client address of the Request.
+func (r *Request) CltAddr() net.Addr {
+	return r.clt.RemoteAddr()
 }
 
 func (r *Request) succCONNECT(conn net.Conn) {
@@ -142,8 +156,4 @@ func genResp(iaddr net.Addr) []byte {
 	resp = append(resp, byte(port>>8), byte(port&0xff))
 
 	return resp
-}
-
-func (r *Request) CltAddr() net.Addr {
-	return r.clt.RemoteAddr()
 }

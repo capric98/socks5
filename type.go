@@ -53,11 +53,13 @@ type frame struct {
 	n int
 }
 
+// Logger is the interface that wraps Println and Fatal method.
 type Logger interface {
 	Println(...interface{})
 	Fatal(...interface{})
 }
 
+// Request represents an authorized CMD request from the client.
 type Request struct {
 	CMD      byte
 	RSV      byte
@@ -73,6 +75,7 @@ type Request struct {
 	udpAck chan net.PacketConn
 }
 
+// Server represents an instance of socks5 server.
 type Server struct {
 	Addr     string
 	Port     uint16

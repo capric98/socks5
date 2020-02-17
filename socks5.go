@@ -1,3 +1,5 @@
+// Package socks5 provides a convenient way to
+// implement a socks5 server with flexible backends.
 package socks5
 
 import (
@@ -9,8 +11,12 @@ import (
 	"time"
 )
 
+// Listen starts the server and listenes Addr:Port.
+// If the server failed to listen, it would return an error.
 func (s *Server) Listen() error {
-	s.init()
+	if e := s.init(); e != nil {
+		return e
+	}
 
 	l, err := net.Listen("tcp", s.Addr+":"+strconv.Itoa(int(s.Port)))
 	if err != nil {
@@ -38,10 +44,12 @@ func (s *Server) Listen() error {
 	return nil
 }
 
+// Accept returns an authorized CMD request from the client.
 func (s *Server) Accept() *Request {
 	return <-s.req
 }
 
+// Shutdown stops the server.
 func (s *Server) Shutdown() {
 	s.stop()
 }
