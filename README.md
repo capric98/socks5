@@ -22,7 +22,7 @@
   * `Addr`: Server will listen this address.
   * `Port`: Server will bind to this port.
   * `AllowUDP`: If this was set to `false`, you would only get `CONNECT` requests from `(*Server).Accept()`
-  * `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/type.go#L84).
+  * `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/type.go#L83).
   * `Auth`: If this was set to `true`, the Server would force clients to use Username and Password to proof their identities.
   * `Ident`: A `map[string]string` which stores Username and Password pairs.
   * `Logger`: An `interface{}` which implements `Println()` and `Fatal()`.
