@@ -40,7 +40,7 @@ func (r *Request) Success(i interface{}) {
 // Fail denies the Request with a given error, the server will write a response
 // of NormalFail message to the client, then close the connection.
 func (r *Request) Fail(e error) {
-	r.logger.Println(INFOLOG, "Connection from", r.clt.RemoteAddr(), "failed because:", e)
+	r.logger.Log(INFO, "Connection from %v failed because %v.", r.CltAddr(), e)
 
 	resp := genResp(r.clt.LocalAddr())
 	resp[1] = NORMALFAIL
@@ -61,7 +61,7 @@ func (r *Request) succCONNECT(conn net.Conn) {
 	resp := genResp(r.clt.LocalAddr())
 
 	if n, e := r.clt.Write(resp); n != len(resp) || e != nil {
-		r.logger.Println(INFOLOG, conn.RemoteAddr(), "was expected to write", len(resp), "byte(s) but wrote", n, "byte(s) with err", e)
+		r.logger.Log(WARN, "Connection from %v was expected to write %v byte(s) and wrote %v byte(s) with err %v.", conn.RemoteAddr(), len(resp), n, e)
 		r.cancel()
 	}
 	// Cancel Deadline
@@ -80,15 +80,13 @@ func (r *Request) succASSOCIATE(pl net.PacketConn) {
 func (r *Request) watch() {
 	go func() {
 		<-r.ctx.Done()
-		if r.clt != nil && r.srv != nil {
-			r.logger.Println(INFOLOG, "Connection", r.clt.RemoteAddr(), "->", r.srv.RemoteAddr(), "was done.")
-		}
-		if r.clt != nil {
-			_ = r.clt.Close()
-		}
-		if r.srv != nil {
+		if r.srv == nil {
+			r.logger.Log(INFO, "Connection from %v was done.", r.CltAddr())
+		} else {
+			r.logger.Log(INFO, "Connection %v -> %v was done.", r.CltAddr(), r.srv.RemoteAddr())
 			_ = r.srv.Close()
 		}
+		_ = r.clt.Close()
 	}()
 }
 

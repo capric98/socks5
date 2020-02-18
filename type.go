@@ -43,9 +43,9 @@ const (
 	TIMEOUT
 	NOSUPPORT
 
-	INFOLOG = "Info:"
-	WARNLOG = "Warn:"
-	FTALLOG = "Fatal:"
+	INFO  = "Info"
+	WARN  = "Warn"
+	FATAL = "Fatal"
 )
 
 type frame struct {
@@ -53,10 +53,9 @@ type frame struct {
 	n int
 }
 
-// Logger is the interface that wraps Println and Fatal method.
+// Logger is the interface that wraps Log method.
 type Logger interface {
-	Println(...interface{})
-	Fatal(...interface{})
+	Log(level string, format string, v ...interface{})
 }
 
 // Request represents an authorized CMD request from the client.

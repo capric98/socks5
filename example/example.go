@@ -13,10 +13,8 @@ func main() {
 	s := &socks5.Server{
 		Addr: "127.0.0.1",
 		Port: 1080,
-		// For verbose running, use socks5.DefaultLogger{} instead.
+		// For silent running, use Logger: socks5.NoLogger{}.
 		// You could also implement your Logger interface if you like :)
-		//
-		// Logger: socks5.DefaultNoLogger{},
 	}
 
 	// If you would like to require an authentication:
@@ -33,7 +31,7 @@ func main() {
 	//
 	// Read this to know in what situation you'd
 	// like to appoint RewriteBND:
-	// https://github.com/capric98/socks5/blob/master/type.go#L84
+	// https://github.com/capric98/socks5/blob/master/type.go#L83
 	// (optional) s.RewriteBND = YourPublicIP
 
 	if e := s.Listen(); e != nil {

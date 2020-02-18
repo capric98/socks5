@@ -20,10 +20,9 @@ func (s *Server) Listen() error {
 
 	l, err := net.Listen("tcp", s.Addr+":"+strconv.Itoa(int(s.Port)))
 	if err != nil {
-		s.Logger.Fatal(err)
 		return err
 	}
-	s.Logger.Println(INFOLOG, "Start listening", l.Addr())
+	s.Logger.Log(INFO, "Start listening %v.", l.Addr())
 	go func() {
 		for {
 			select {
@@ -32,9 +31,8 @@ func (s *Server) Listen() error {
 				return
 			default:
 				conn, err := l.Accept()
-				s.Logger.Println(INFOLOG, "Accept the connection from", conn.RemoteAddr())
 				if err != nil {
-					s.Logger.Println(WARNLOG, "net Accept:", err)
+					s.Logger.Log(WARN, "Failed to accept a connection: %v.", err)
 					continue
 				}
 				go s.handle(conn)
@@ -60,7 +58,7 @@ func (s *Server) handle(conn net.Conn) {
 
 	defer func() {
 		if e != nil {
-			s.Logger.Println(INFOLOG, conn.RemoteAddr(), "raised an error", e)
+			s.Logger.Log(INFO, "Connection from %v raised an error: %v.", conn.RemoteAddr(), e)
 			conn.Close()
 		}
 	}()
@@ -122,7 +120,7 @@ func (s *Server) handle(conn net.Conn) {
 				return
 			}
 		} else {
-			s.Logger.Println(INFOLOG, "Connection from", conn.RemoteAddr(), "failed to pass the authentication.")
+			s.Logger.Log(WARN, "Connection from %v failed to pass the authentication.", conn.RemoteAddr())
 			_, _ = conn.Write([]byte{VERSION, 1})
 			conn.Close()
 			return
@@ -185,6 +183,7 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 
+	s.Logger.Log(INFO, "Accept the connection from %v.", conn.RemoteAddr())
 	req.watch()
 	s.req <- req
 }
@@ -208,6 +207,7 @@ func (s *Server) auth(conn net.Conn) bool {
 
 func (s *Server) handleUDP(req *Request) {
 	defer func() { _ = recover() }()
+	defer req.cancel()
 
 	conn := req.clt
 	defer conn.Close()
@@ -240,7 +240,7 @@ func (s *Server) handleUDP(req *Request) {
 	//s.Logger.Println(INFOLOG, "ASSOCIATE response:", resp)
 
 	if n, e := conn.Write(resp); n != len(resp) || e != nil {
-		s.Logger.Println(INFOLOG, conn.RemoteAddr(), "was expected to write", len(resp), "but wrote", n, "bytes with err", e)
+		s.Logger.Log(INFO, "Connection from %v was expected to write %v byte(s) and wrote %v byte(s) with err: %v.", conn.RemoteAddr(), len(resp), n, e)
 		conn.Close()
 		return
 	}
@@ -290,6 +290,9 @@ func (s *Server) handleUDP(req *Request) {
 		if !caddr.(*net.UDPAddr).IP.Equal(conn.RemoteAddr().(*net.TCPAddr).IP) {
 			continue
 		}
+		if n < 11 {
+			continue
+		}
 		if buffer[0]+buffer[1]+buffer[2] != 0 {
 			continue
 		}
@@ -313,8 +316,6 @@ func (s *Server) handleUDP(req *Request) {
 			domainEnd = 5 + int(buffer[4])
 			raddr, _ = net.ResolveUDPAddr("udp", string(buffer[5:domainEnd])+":"+strconv.Itoa(int(buffer[domainEnd])<<8+int(buffer[domainEnd+1])))
 			_, we = spl.WriteTo(buffer[domainEnd+2:n], raddr)
-		default:
-			return
 		}
 	}
 }

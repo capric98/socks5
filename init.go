@@ -9,13 +9,13 @@ import (
 
 func (s *Server) init() error {
 	if s.Logger == nil {
-		s.Logger = DefaultLogger{}
+		s.Logger = defaultLogger{}
 	}
 	if s.Port == 0 {
-		return errors.New(FTALLOG + " Port cannot be 0!")
+		return errors.New("Port cannot be 0!")
 	}
 	if s.Auth && s.Ident == nil {
-		s.Logger.Println(WARNLOG, "Use Username&Password Authentication, but given Ident is nil.")
+		s.Logger.Log(WARN, "Use Username&Password Authentication, but given Ident is nil.")
 		s.Ident = make(map[string]string)
 	}
 	if s.TimeOut == 0 {
