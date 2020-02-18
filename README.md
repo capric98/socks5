@@ -25,7 +25,7 @@
   * `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/type.go#L83).
   * `Auth`: If this was set to `true`, the Server would force clients to use Username and Password to proof their identities.
   * `Ident`: A `map[string]string` which stores Username and Password pairs.
-  * `Logger`: An `interface{}` which implements `Println()` and `Fatal()`.
+  * `Logger`: An `interface{}` which implements `Log()`.
   * `TimeOut`: The connection to the Server will timeout if its `*Request` fails to `Success` or `Fail` in `TimeOut` time.
 * `(*Server).Listen()`
 * Keep `(*Server).Accept()`, and handle every `*Request`:
