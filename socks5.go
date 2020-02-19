@@ -210,10 +210,7 @@ func (s *Server) handleUDP(req *Request) {
 	defer req.cancel()
 
 	conn := req.clt
-	defer conn.Close()
-	if _, ok := conn.(*net.TCPConn); !ok {
-		return
-	}
+
 	spl := <-req.udpAck
 	if spl == nil {
 		return
@@ -222,7 +219,6 @@ func (s *Server) handleUDP(req *Request) {
 	pl, e := net.ListenPacket("udp", s.Addr+":")
 	if e != nil {
 		_, _ = conn.Write([]byte{VERSION, NORMALFAIL, RSV, ATYPIPv4, 0, 0, 0, 0, 0, 0})
-		conn.Close()
 		return
 	}
 	defer pl.Close()
@@ -241,7 +237,6 @@ func (s *Server) handleUDP(req *Request) {
 
 	if n, e := conn.Write(resp); n != len(resp) || e != nil {
 		s.Logger.Log(INFO, "Connection from %v was expected to write %v byte(s) and wrote %v byte(s) with err: %v.", conn.RemoteAddr(), len(resp), n, e)
-		conn.Close()
 		return
 	}
 
@@ -253,8 +248,13 @@ func (s *Server) handleUDP(req *Request) {
 		buffer := make([]byte, 16*1024)
 		var n int
 		var re, we error
+		var taddr net.Addr
 
-		taddr := <-addrChan
+		select {
+		case taddr = <-addrChan:
+		case <-req.ctx.Done():
+			return
+		}
 
 		head := append([]byte{0, 0, 0}, resp[3:]...)
 		headlen := len(head)
