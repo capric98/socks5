@@ -68,6 +68,7 @@ func (s *Server) handle(conn net.Conn) {
 	// We will cancel this deadline in (*Request).Success method.
 	// Remember to cancel in (*Server).handleUDP too.
 	_ = conn.SetDeadline(time.Now().Add(s.TimeOut))
+
 	if _, e = conn.Read(one); e != nil {
 		return
 	}
@@ -85,19 +86,10 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	reply := []byte{VERSION, NOACCEPT}
-	if s.Auth {
-		for i := 0; i < int(one[0]); i++ {
-			if clientMethods[i] == PSSWD {
-				reply[1] = PSSWD
-				break
-			}
-		}
-	} else {
-		for i := 0; i < int(one[0]); i++ {
-			if clientMethods[i] == NOAUTH {
-				reply[1] = NOAUTH
-				break
-			}
+	for i := 0; i < int(one[0]); i++ {
+		if s.authMethod[clientMethods[i]] {
+			reply[1] = clientMethods[i]
+			break
 		}
 	}
 
@@ -108,23 +100,29 @@ func (s *Server) handle(conn net.Conn) {
 		e = io.ErrShortWrite
 		return
 	}
-	if reply[1] == NOACCEPT {
-		conn.Close()
+
+	var authPassed bool
+	var authResp []byte
+	switch reply[1] {
+	case NOAUTH:
+		authPassed, authResp = true, nil
+	case PSSWD:
+		authPassed, authResp = s.psswdauth(conn)
+	case NOACCEPT:
+		_ = conn.Close()
 		return
 	}
 
-	if s.Auth {
-		if s.auth(conn) {
-			if n, e := conn.Write([]byte{VERSION, 0}); e != nil || n != 2 {
-				conn.Close()
-				return
-			}
-		} else {
-			s.Logger.Log(WARN, "Connection from %v failed to pass the authentication.", conn.RemoteAddr())
-			_, _ = conn.Write([]byte{VERSION, 1})
+	if authPassed {
+		if n, e := conn.Write(authResp); e != nil || n != len(authResp) {
 			conn.Close()
 			return
 		}
+	} else {
+		s.Logger.Log(WARN, "Connection from %v failed to pass the authentication.", conn.RemoteAddr())
+		_, _ = conn.Write(authResp)
+		conn.Close()
+		return
 	}
 
 	// Handle CMD
@@ -186,23 +184,6 @@ func (s *Server) handle(conn net.Conn) {
 	s.Logger.Log(INFO, "Accept the connection from %v.", conn.RemoteAddr())
 	req.watch()
 	s.req <- req
-}
-
-func (s *Server) auth(conn net.Conn) bool {
-	head := make([]byte, 2)
-	if n, e := conn.Read(head); n != 2 || e != nil || head[0] != 1 {
-		return false
-	}
-	userbyte := make([]byte, int(head[1])+1)
-	if n, e := conn.Read(userbyte); n != int(head[1])+1 || e != nil {
-		return false
-	}
-	password := make([]byte, int(userbyte[int(head[1])]))
-	if n, e := conn.Read(password); n != int(userbyte[int(head[1])]) || e != nil {
-		return false
-	}
-
-	return s.Ident[string(userbyte[:int(head[1])])] == string(password)
 }
 
 func (s *Server) handleUDP(req *Request) {

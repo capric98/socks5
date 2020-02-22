@@ -24,5 +24,13 @@ func (s *Server) init() error {
 
 	s.ctx, s.stop = context.WithCancel(context.Background())
 	s.req = make(chan *Request, 65535)
+
+	s.authMethod = make([]bool, 256)
+	if s.Auth {
+		s.authMethod[PSSWD] = true
+	} else {
+		s.authMethod[NOAUTH] = true
+	}
+
 	return nil
 }

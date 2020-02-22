@@ -99,6 +99,8 @@ type Server struct {
 
 	Auth  bool
 	Ident map[string]string
+	// TODO: Make it easy to customize auth functions.
+	authMethod []bool
 
 	TimeOut time.Duration
 	Logger  Logger
