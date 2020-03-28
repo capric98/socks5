@@ -40,7 +40,7 @@ func (r *Request) Success(i interface{}) {
 // Fail denies the Request with a given error, the server will write a response
 // of NormalFail message to the client, then close the connection.
 func (r *Request) Fail(e error) {
-	r.logger.Log(INFO, "Connection from %v failed because %v.", r.CltAddr(), e)
+	r.logger.Log(INFO, "Connection from %v failed because %v.", r.ClientAddr(), e)
 
 	resp := genResp(r.clt.LocalAddr())
 	resp[1] = NORMALFAIL
@@ -50,8 +50,8 @@ func (r *Request) Fail(e error) {
 	r.cancel()
 }
 
-// CltAddr returns the client address of the Request.
-func (r *Request) CltAddr() net.Addr {
+// ClientAddr returns the client address of the Request.
+func (r *Request) ClientAddr() net.Addr {
 	return r.clt.RemoteAddr()
 }
 
@@ -81,9 +81,9 @@ func (r *Request) watch() {
 	go func() {
 		<-r.ctx.Done()
 		if r.srv == nil {
-			r.logger.Log(INFO, "Connection from %v was done.", r.CltAddr())
+			r.logger.Log(INFO, "Connection from %v was done.", r.ClientAddr())
 		} else {
-			r.logger.Log(INFO, "Connection %v -> %v was done.", r.CltAddr(), r.srv.RemoteAddr())
+			r.logger.Log(INFO, "Connection %v -> %v was done.", r.ClientAddr(), r.srv.RemoteAddr())
 			_ = r.srv.Close()
 		}
 		_ = r.clt.Close()

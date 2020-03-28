@@ -53,7 +53,7 @@ func main() {
 
 				switch req.CMD {
 				case socks5.CONNECT:
-					log.Println("CONNECT:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
+					log.Println("CONNECT:", req.ClientAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
 					now := time.Now()
 					conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
 					log.Println("Dial to", DST+":"+strconv.Itoa(int(req.DST_PORT)), "in", time.Since(now).String())
@@ -63,7 +63,7 @@ func main() {
 						req.Success(conn)
 					}
 				case socks5.ASSOCIATE:
-					log.Println("ASSOCIATE:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
+					log.Println("ASSOCIATE:", req.ClientAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
 					pl, e := net.ListenPacket("udp", ":")
 					if e != nil {
 						req.Fail(e)

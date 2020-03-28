@@ -125,6 +125,8 @@ func (s *Server) handle(conn net.Conn) {
 
 	var authPassed bool
 	var authResp []byte
+
+	// Authentication
 	switch reply[1] {
 	case NOAUTH:
 		authPassed, authResp = true, nil
