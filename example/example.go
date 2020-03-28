@@ -43,33 +43,35 @@ func main() {
 	for {
 		req := s.Accept()
 
-		if req.ATYP == socks5.ATYPDOMAIN {
-			DST = string(req.DST_ADDR)
-		} else {
-			DST = (net.IP(req.DST_ADDR)).String()
-		}
+		if req != nil {
+			go func(req *socks5.Request) {
+				if req.ATYP == socks5.ATYPDOMAIN {
+					DST = string(req.DST_ADDR)
+				} else {
+					DST = (net.IP(req.DST_ADDR)).String()
+				}
 
-		switch req.CMD {
-		case socks5.CONNECT:
-			log.Println("CONNECT:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
-			now := time.Now()
-			conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
-			log.Println("Dial to", DST+":"+strconv.Itoa(int(req.DST_PORT)), "in", time.Since(now).String())
-			if err != nil {
-				req.Fail(err)
-			} else {
-				req.Success(conn)
-			}
-		case socks5.ASSOCIATE:
-			log.Println("ASSOCIATE:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
-			pl, e := net.ListenPacket("udp", ":")
-			if e != nil {
-				req.Fail(e)
-			} else {
-				req.Success(pl)
-			}
-		default:
-			continue
+				switch req.CMD {
+				case socks5.CONNECT:
+					log.Println("CONNECT:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
+					now := time.Now()
+					conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
+					log.Println("Dial to", DST+":"+strconv.Itoa(int(req.DST_PORT)), "in", time.Since(now).String())
+					if err != nil {
+						req.Fail(err)
+					} else {
+						req.Success(conn)
+					}
+				case socks5.ASSOCIATE:
+					log.Println("ASSOCIATE:", req.CltAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
+					pl, e := net.ListenPacket("udp", ":")
+					if e != nil {
+						req.Fail(e)
+					} else {
+						req.Success(pl)
+					}
+				}
+			}(req)
 		}
 	}
 }
