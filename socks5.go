@@ -23,18 +23,33 @@ func (s *Server) Listen() error {
 		return err
 	}
 	s.Logger.Log(INFO, "Start listening %v.", l.Addr())
+
+	cc := make(chan net.Conn)
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				if e, ok := err.(*net.OpError); ok {
+					// I cannot use internal.poll.ErrNetClosing since its an internal package.
+					if e.Unwrap() != nil && e.Unwrap().Error() == "use of closed network connection" {
+						// l was closed, quit this goroutine
+						return
+					}
+				}
+				s.Logger.Log(WARN, "Failed to accept a connection: %v.", err)
+			} else {
+				cc <- conn
+			}
+		}
+	}()
+
 	go func() {
 		for {
 			select {
 			case <-s.ctx.Done():
 				_ = l.Close()
 				return
-			default:
-				conn, err := l.Accept()
-				if err != nil {
-					s.Logger.Log(WARN, "Failed to accept a connection: %v.", err)
-					continue
-				}
+			case conn := <-cc:
 				go s.handle(conn)
 			}
 		}
@@ -43,12 +58,19 @@ func (s *Server) Listen() error {
 }
 
 // Accept returns an authorized CMD request from the client.
+// Accept from a server which was shutdown will return a nil Request.
 func (s *Server) Accept() *Request {
-	return <-s.req
+	select {
+	case <-s.ctx.Done():
+		return nil
+	case req := <-s.req:
+		return req
+	}
 }
 
 // Shutdown stops the server.
 func (s *Server) Shutdown() {
+	// stop() is the func from context.WithCancel(context.Background())
 	s.stop()
 }
 
@@ -58,7 +80,7 @@ func (s *Server) handle(conn net.Conn) {
 
 	defer func() {
 		if e != nil {
-			s.Logger.Log(INFO, "Connection from %v raised an error: %v.", conn.RemoteAddr(), e)
+			s.Logger.Log(WARN, "Connection from %v raised an error: %v.", conn.RemoteAddr(), e)
 			conn.Close()
 		}
 	}()
