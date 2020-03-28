@@ -245,6 +245,16 @@ func (s *Server) handleUDP(req *Request) {
 		return
 	}
 
+	// Detect conn close.
+	// This goroutine will return if req.watch() closes the connection.
+	go func() {
+		var eof error
+		one := make([]byte, 1)
+		for ; eof == nil; _, eof = conn.Read(one) {
+		}
+		req.cancel()
+	}()
+
 	addrChan := make(chan net.Addr, 10)
 	defer close(addrChan)
 
@@ -265,9 +275,14 @@ func (s *Server) handleUDP(req *Request) {
 		headlen := len(head)
 
 		for re == nil && we == nil {
-			_ = spl.SetReadDeadline(time.Now().Add(s.TimeOut))
-			_ = pl.SetWriteDeadline(time.Now().Add(s.TimeOut))
+			// The life cycle of the ASSOCIATE should be controled
+			// by its original TCP connection.
+			// _ = spl.SetReadDeadline(time.Now().Add(s.TimeOut))
+			// _ = pl.SetWriteDeadline(time.Now().Add(s.TimeOut))
 			n, _, re = spl.ReadFrom(buffer)
+			if n == 0 {
+				continue
+			}
 
 			head = append(head, buffer[:n]...)
 
@@ -288,9 +303,14 @@ func (s *Server) handleUDP(req *Request) {
 	var re, we error
 	var caddr, raddr net.Addr
 	for we == nil && re == nil {
-		_ = pl.SetReadDeadline(time.Now().Add(s.TimeOut))
-		_ = spl.SetWriteDeadline(time.Now().Add(s.TimeOut))
+		// The life cycle of the ASSOCIATE should be controled
+		// by its original TCP connection.
+		// _ = pl.SetReadDeadline(time.Now().Add(s.TimeOut))
+		// _ = spl.SetWriteDeadline(time.Now().Add(s.TimeOut))
 		n, caddr, re = pl.ReadFrom(buffer)
+		if n == 0 {
+			continue
+		}
 
 		if !caddr.(*net.UDPAddr).IP.Equal(conn.RemoteAddr().(*net.TCPAddr).IP) {
 			continue
