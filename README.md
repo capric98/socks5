@@ -122,7 +122,3 @@ func main() {
 </details>
 
 ### LESS IS MORE
-
-```
-
-```
