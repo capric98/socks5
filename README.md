@@ -35,6 +35,10 @@
 
 ## Example
 This is a very simple example which uses default `net.Conn` and `net.PacketConn` to handle `*Request`. Please notice that in this example, ASSOCIATE requests will be refused since `s.AllowUDP` has a default `false` value and `s.AllowUDP = true` is commented.
+
+<details>
+  <summary>Code</summary>
+
 ```golang
 package main
 
@@ -62,7 +66,7 @@ func main() {
 	// ...
 	// s.Auth = true
 	// s.Ident = id
-
+	
 	// If you would like to accept UDP replying:
 	//
 	// s.AllowUDP = true
@@ -71,16 +75,16 @@ func main() {
 	// like to appoint RewriteBND:
 	// https://github.com/capric98/socks5/blob/master/type.go#L83
 	// (optional) s.RewriteBND = YourPublicIP
-
+	
 	if e := s.Listen(); e != nil {
 		log.Fatal(e)
 	}
 	// To stop the server: s.Shutdown()
-
+	
 	var DST string
 	for {
 		req := s.Accept()
-
+	
 		if req != nil {
 			go func(req *socks5.Request) {
 				if req.ATYP == socks5.ATYPDOMAIN {
@@ -88,7 +92,7 @@ func main() {
 				} else {
 					DST = (net.IP(req.DST_ADDR)).String()
 				}
-
+	
 				switch req.CMD {
 				case socks5.CONNECT:
 					log.Println("CONNECT:", req.ClientAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
@@ -115,4 +119,10 @@ func main() {
 }
 ```
 
+</details>
+
 ### LESS IS MORE
+
+```
+
+```
