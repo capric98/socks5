@@ -18,9 +18,10 @@ func main() {
 		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
 	}()
 
-	srv := socks5.NewServer("127.0.0.1", 1080, &socks5.SOpts{
-		AllowUDP: true,
-		Timeout:  10 * time.Second,
+	srv := socks5.NewServer("127.0.0.1:1080", &socks5.SOpts{
+		AllowUDP:   true,
+		RewriteBND: net.IPv4(127, 0, 0, 1),
+		Timeout:    10 * time.Second,
 	})
 	srv.AddAuth(auth.NewNoAuth())
 	if e := srv.Listen(); e != nil {

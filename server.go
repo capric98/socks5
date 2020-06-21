@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/capric98/socks5/auth"
@@ -13,7 +12,6 @@ import (
 // Server represents a socks5 server.
 type Server struct {
 	addr  string
-	port  int
 	auths map[byte]auth.Authenticator
 
 	allowUDP   bool
@@ -43,13 +41,12 @@ var (
 )
 
 // NewServer news a server.
-func NewServer(addr string, port int, opt *SOpts) (s *Server) {
+func NewServer(addr string, opt *SOpts) (s *Server) {
 	if opt == nil {
 		opt = &defaultOpts
 	}
 	s = &Server{
 		addr:  addr,
-		port:  int(uint16(port)),
 		auths: make(map[byte]auth.Authenticator),
 
 		allowUDP:   opt.AllowUDP,
@@ -70,7 +67,7 @@ func (s *Server) AddAuth(a auth.Authenticator) {
 
 // Listen starts a server.
 func (s *Server) Listen() error {
-	l, err := net.Listen("tcp", s.addr+":"+strconv.Itoa(int(s.port)))
+	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package socks5
 import (
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,7 +31,7 @@ func (s *Server) associate(req *Request) {
 	// Cancel Deadline
 	_ = req.clt.SetDeadline(time.Time{})
 
-	plLocal, e := net.ListenPacket("udp", s.addr+":")
+	plLocal, e := net.ListenPacket("udp", s.addr[:strings.Index(s.addr, ":")+1])
 	if e != nil {
 		_, _ = conn.Write([]byte{VERSION, FAIL, RSV, IPV4T, 0, 0, 0, 0, 0, 0})
 		return
