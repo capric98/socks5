@@ -3,7 +3,17 @@ package socks5
 import (
 	"net"
 	"strconv"
+	"sync"
 	"time"
+)
+
+var (
+	bufPool = sync.Pool{
+		New: func() interface{} {
+			buf := make([]byte, 65535)
+			return &buf
+		},
+	}
 )
 
 func (s *Server) associate(req *Request) {
@@ -41,12 +51,17 @@ func (s *Server) associate(req *Request) {
 	}
 
 	// Detect conn close.
-	// This goroutine will return if req.watch() closes the connection.
+	// This goroutine will return if the connection was closed.
 	go func() {
 		var eof error
 		one := make([]byte, 1)
 		for ; eof == nil; _, eof = conn.Read(one) {
 		}
+
+		// The life cycle of the ASSOCIATE should be controled
+		// by its original TCP connection.
+		plRemote.SetDeadline(time.Now())
+		plLocal.SetDeadline(time.Now())
 		req.cancel()
 	}()
 
@@ -59,7 +74,10 @@ func (s *Server) associate(req *Request) {
 		var n int
 		var re, we error
 		var taddr net.Addr
-		buffer := make([]byte, 65535)
+		buffer := *(bufPool.Get().(*[]byte))
+		defer func() {
+			bufPool.Put(&buffer)
+		}()
 
 		// Get first toAddr.
 		select {
@@ -72,10 +90,6 @@ func (s *Server) associate(req *Request) {
 		headLen := len(head)
 
 		for re == nil && we == nil {
-			// The life cycle of the ASSOCIATE should be controled
-			// by its original TCP connection.
-			// _ = plLocal.SetReadDeadline(time.Now().Add(s.TimeOut))
-			// _ = plRemote.SetWriteDeadline(time.Now().Add(s.TimeOut))
 			n, _, re = plRemote.ReadFrom(buffer)
 			if n == 0 {
 				continue
@@ -99,12 +113,12 @@ func (s *Server) associate(req *Request) {
 	var n, domainEnd int
 	var re, we error
 	var caddr, raddr net.Addr
-	buffer := make([]byte, 65535)
+	buffer := *(bufPool.Get().(*[]byte))
+	defer func() {
+		bufPool.Put(&buffer)
+	}()
+
 	for we == nil && re == nil {
-		// The life cycle of the ASSOCIATE should be controled
-		// by its original TCP connection.
-		// _ = plLocal.SetReadDeadline(time.Now().Add(s.TimeOut))
-		// _ = plRemote.SetWriteDeadline(time.Now().Add(s.TimeOut))
 		n, caddr, re = plLocal.ReadFrom(buffer)
 		if n == 0 {
 			continue

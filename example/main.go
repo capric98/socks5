@@ -6,11 +6,18 @@ import (
 	"strconv"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/capric98/socks5"
 	"github.com/capric98/socks5/auth"
 )
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
+	}()
+
 	srv := socks5.NewServer("127.0.0.1", 1080, &socks5.SOpts{
 		AllowUDP: true,
 		Timeout:  10 * time.Second,

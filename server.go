@@ -3,7 +3,6 @@ package socks5
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"time"
@@ -112,8 +111,8 @@ func (s *Server) Listen() error {
 			select {
 			case <-s.ctx.Done():
 				return
-			case e := <-s.errs:
-				log.Println(e)
+			case <-s.errs:
+				//log.Println(e)
 			}
 		}
 	}()
