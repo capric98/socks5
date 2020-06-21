@@ -15,7 +15,7 @@ func NewUaP() Authenticator {
 }
 
 func (a *uap) Method() byte {
-	return 1
+	return 1 // 1 -> Username & Password Auth
 }
 
 func (a *uap) Check(conn net.Conn) (passed bool) {

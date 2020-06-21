@@ -10,7 +10,7 @@ func NewNoAuth() Authenticator {
 }
 
 func (n *noauth) Method() byte {
-	return 0
+	return 0 // 0 -> No Auth
 }
 
 func (n *noauth) Check(conn net.Conn) bool {
