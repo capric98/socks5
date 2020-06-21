@@ -193,6 +193,7 @@ func (s *Server) handle(conn net.Conn) {
 		rsv:  cmdHead[2],
 		atyp: cmdHead[3],
 		clt:  conn,
+		errs: s.errs,
 	}
 
 	var residue int
