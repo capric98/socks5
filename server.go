@@ -2,6 +2,8 @@ package socks5
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"time"
@@ -21,6 +23,9 @@ type Server struct {
 
 	ctx    context.Context
 	cancel func()
+
+	reqs chan *Request
+	errs chan error
 }
 
 // SOpts illustrates options to a server.
@@ -39,17 +44,29 @@ var (
 )
 
 // NewServer news a server.
-func NewServer(addr string, opt *SOpts) (s *Server) {
+func NewServer(addr string, port int, opt *SOpts) (s *Server) {
 	if opt == nil {
 		opt = &defaultOpts
 	}
 	s = &Server{
+		addr:  addr,
+		port:  int(uint16(port)),
+		auths: make(map[byte]auth.Authenticator),
+
 		allowUDP:   opt.AllowUDP,
 		rewriteBND: opt.RewriteBND,
 		timeout:    opt.Timeout,
+
+		reqs: make(chan *Request, 65535),
+		errs: make(chan error, 255),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return
+}
+
+// AddAuth adds an authenticator to the server.
+func (s *Server) AddAuth(a auth.Authenticator) {
+	s.auths[a.Method()] = a
 }
 
 // Listen starts a server.
@@ -71,7 +88,7 @@ func (s *Server) Listen() error {
 						return
 					}
 				}
-				// s.Logger.Log(WARN, "Failed to accept a connection: %v.", err)
+				s.errs <- err
 			} else {
 				cc <- conn
 			}
@@ -88,6 +105,18 @@ func (s *Server) Listen() error {
 			}
 		}
 	}()
+
+	// TODO: handle errs
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case e := <-s.errs:
+				log.Println(e)
+			}
+		}
+	}()
 	return nil
 }
 
@@ -96,11 +125,21 @@ func (s *Server) Stop() {
 	s.cancel()
 }
 
+// Accepet returns a valid request.
+func (s *Server) Accepet() (req *Request) {
+	select {
+	case req = <-s.reqs:
+	case <-s.ctx.Done():
+	}
+	return
+}
+
 func (s *Server) handle(conn net.Conn) {
 	//var n int
 
 	defer func() {
 		if p := recover(); p != nil {
+			s.errs <- fmt.Errorf("%v", p)
 			conn.Close()
 		}
 	}()
@@ -136,7 +175,7 @@ func (s *Server) handle(conn net.Conn) {
 	if _, e := conn.Write([]byte{VERSION, authenticator.Method()}); e != nil {
 		panic(e)
 	}
-	if authenticator.Check(conn) {
+	if !authenticator.Check(conn) {
 		panic("Auth Fail")
 	}
 
@@ -148,4 +187,52 @@ func (s *Server) handle(conn net.Conn) {
 	if cmdHead[0] != VERSION {
 		panic(cmdHead[0])
 	}
+
+	req := &Request{
+		cmd:  cmdHead[1],
+		rsv:  cmdHead[2],
+		atyp: cmdHead[3],
+		clt:  conn,
+	}
+
+	var residue int
+	switch req.atyp {
+	case IPV4T:
+		residue = 6
+	case IPV6T:
+		residue = 18
+	case DOMAIN:
+		one := make([]byte, 1)
+		if _, e := conn.Read(one); e != nil {
+			panic(e)
+		}
+		residue = int(one[0]) + 2
+	}
+	resbyte := make([]byte, residue)
+	if _, e := conn.Read(resbyte); e != nil {
+		panic(e)
+	}
+	req.dstPort = uint16(resbyte[residue-2])<<8 + uint16(resbyte[residue-1])
+	req.dstAddr = resbyte[:residue-2]
+	req.ctx, req.cancel = context.WithCancel(s.ctx)
+
+	switch cmdHead[1] {
+	case CONNECT:
+	case ASSOCIATE:
+		if s.allowUDP {
+			req.pconn = make(chan net.PacketConn)
+			go s.associate(req)
+		} else {
+			_, _ = conn.Write([]byte{VERSION, FORBID, RSV, IPV4T, 0, 0, 0, 0, 0, 0})
+			conn.Close()
+			return
+		}
+	default:
+		// No support for BIND yet.
+		_, _ = conn.Write([]byte{VERSION, NSUPPORT, RSV, IPV4T, 0, 0, 0, 0, 0, 0})
+		conn.Close()
+		return
+	}
+	req.watch()
+	s.reqs <- req
 }

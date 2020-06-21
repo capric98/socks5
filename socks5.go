@@ -19,10 +19,10 @@ const RSV byte = 0
 // Address Type
 const (
 	_ byte = iota
-	IPV4
+	IPV4T
 	_
 	DOMAIN
-	IPV6
+	IPV6T
 )
 
 // Replies
