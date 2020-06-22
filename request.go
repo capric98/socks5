@@ -2,6 +2,7 @@ package socks5
 
 import (
 	"context"
+	"fmt"
 	"net"
 )
 
@@ -28,7 +29,7 @@ type Request struct {
 // net.PacketConn(ASSOCIATE).
 func (req *Request) Success(i interface{}) {
 	if i == nil {
-		req.Fail(nil)
+		req.Fail(fmt.Errorf("nil interface of Success()"))
 	}
 
 	switch req.cmd {
@@ -37,31 +38,29 @@ func (req *Request) Success(i interface{}) {
 		if ok {
 			req.connect(conn)
 		} else {
-			// r.Fail(errors.Errorf("CONNECT got %T rather than net.Conn .", i))
+			req.Fail(fmt.Errorf("got %T rather than net.Conn to approve a CONNECT", i))
 		}
 	case ASSOCIATE:
 		pl, ok := i.(net.PacketConn)
 		if ok {
 			req.pconn <- pl
 		} else {
-			// r.Fail(errors.Errorf("ASSOCIATE got %T rather than net.PacketConn .", i))
+			req.Fail(fmt.Errorf("got %T rather than net.PacketConn to approve an ASSOCIATE", i))
 		}
 	default:
-		// r.Fail(errors.New("CMD(" + strconv.Itoa(int(r.CMD)) + ") unsupported."))
+		req.Fail(fmt.Errorf("unsupported CMD(%v)", req.cmd))
 	}
 }
 
 // Fail denies the Request with a given error, the server will write a response
 // of NormalFail message to the client, then close the connection.
 func (req *Request) Fail(e error) {
-	// r.logger.Log(INFO, "Connection from %v failed because %v.", r.ClientAddr(), e)
-
 	resp := genCMDResp(req.clt.LocalAddr())
 	resp[1] = FAIL
 	_, _ = req.clt.Write(resp)
 
-	//close(r.udpAck)
 	req.cancel()
+	req.errs <- fmt.Errorf("request from %v failed - %v", req.clt.RemoteAddr(), e)
 }
 
 // DST returns a string which represents destination.

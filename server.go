@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/capric98/socks5/auth"
@@ -11,8 +12,10 @@ import (
 
 // Server represents a socks5 server.
 type Server struct {
-	addr  string
-	auths map[byte]auth.Authenticator
+	addr string
+
+	authMu sync.RWMutex
+	auths  []auth.Authenticator
 
 	allowUDP   bool
 	rewriteBND net.IP
@@ -21,15 +24,42 @@ type Server struct {
 	ctx    context.Context
 	cancel func()
 
-	reqs chan *Request
-	errs chan error
+	reqs     chan *Request
+	errs     chan error
+	cerrChan chan error
 }
 
 // SOpts illustrates options to a server.
 type SOpts struct {
-	AllowUDP   bool
+	// AllowUDP determines whether the server will accept
+	// ASSOCIATE CMD or not.
+	AllowUDP bool
+	// RewriteBND is only available when AllowUDP is true,
+	// and the server is behind a NAT network, with all
+	// its UDP ports forwarded, and serving ASSOCIATE CMD
+	// from clients who are not in the same intranet as the
+	// server.
+	// In this situation, you will want to rewrite BND.ADDR
+	// in server's reply message in order to make clients
+	// able to send UDP packet to BND.ADDR:BND.PORT.
+	//
+	// There is another situation, that you do not specify
+	// Addr, in this case, "net" will listen [::] by default,
+	// result in ASSOCIATE response be:
+	// byte: {5 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 r1 r0}
+	// (Means the client should send its udp packet to ipv6
+	//  address [::]:(a random port equals {r1*256+r0}))
+	// Clients will consider this kind of response as invalid,
+	// so you'd better appoint RewriteBND mannually to avoid this.
 	RewriteBND net.IP
-	Timeout    time.Duration
+	// Timeout forces the client to finish tasks in a certain time.
+	// For a connection, Timeout = max{Auth + Send CMD + req.Accept()},
+	// and after the (*Request).Accpet(), it will be canceled for
+	// this connection.
+	Timeout time.Duration
+	// ErrChan is the channel to get errors or info from the server.
+	// Set it to nil to ignore all errors and info.
+	ErrChan chan error
 }
 
 var (
@@ -37,32 +67,46 @@ var (
 		AllowUDP:   false,
 		RewriteBND: nil,
 		Timeout:    time.Minute,
+		ErrChan:    nil,
 	}
 )
 
-// NewServer news a server.
+// NewServer news a server with given address and options.
 func NewServer(addr string, opt *SOpts) (s *Server) {
 	if opt == nil {
 		opt = &defaultOpts
 	}
 	s = &Server{
 		addr:  addr,
-		auths: make(map[byte]auth.Authenticator),
+		auths: make([]auth.Authenticator, 256),
 
 		allowUDP:   opt.AllowUDP,
 		rewriteBND: opt.RewriteBND,
 		timeout:    opt.Timeout,
 
-		reqs: make(chan *Request, 65535),
-		errs: make(chan error, 255),
+		reqs:     make(chan *Request, 65535),
+		errs:     make(chan error, 255),
+		cerrChan: opt.ErrChan,
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return
 }
 
-// AddAuth adds an authenticator to the server.
-func (s *Server) AddAuth(a auth.Authenticator) {
+// SetAuth sets an authenticator to the server.
+// It will overwrite exsited Authenticator which
+// has the same Method.
+func (s *Server) SetAuth(a auth.Authenticator) {
+	s.authMu.Lock()
 	s.auths[a.Method()] = a
+	s.authMu.Unlock()
+}
+
+// GetAuth gets an authenticator from the server of given Method.
+// If given Method has no Authenticator, it will return nil.
+func (s *Server) GetAuth(method byte) auth.Authenticator {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.auths[method]
 }
 
 // Listen starts a server.
@@ -73,6 +117,7 @@ func (s *Server) Listen() error {
 	}
 
 	cc := make(chan net.Conn)
+	// accept connections
 	go func() {
 		for {
 			conn, err := l.Accept()
@@ -90,6 +135,7 @@ func (s *Server) Listen() error {
 			}
 		}
 	}()
+	// handle connections
 	go func() {
 		for {
 			select {
@@ -102,26 +148,36 @@ func (s *Server) Listen() error {
 		}
 	}()
 
-	// TODO: handle errs
+	// handle err
 	go func() {
 		for {
 			select {
 			case <-s.ctx.Done():
 				return
-			case <-s.errs:
-				//log.Println(e)
+			case e := <-s.errs:
+				if s.cerrChan != nil {
+					select {
+					case s.cerrChan <- e:
+					default:
+						// just in case
+					}
+				}
 			}
 		}
 	}()
 	return nil
 }
 
-// Stop stopss a server.
+// Stop stops a server.
 func (s *Server) Stop() {
 	s.cancel()
+	if s.cerrChan != nil {
+		close(s.cerrChan)
+	}
 }
 
 // Accepet returns a valid request.
+// If the server is stopped, it will return nil.
 func (s *Server) Accepet() (req *Request) {
 	select {
 	case req = <-s.reqs:
@@ -131,11 +187,9 @@ func (s *Server) Accepet() (req *Request) {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	//var n int
-
 	defer func() {
 		if p := recover(); p != nil {
-			s.errs <- fmt.Errorf("%v", p)
+			s.errs <- fmt.Errorf("denied connection from %v - %v", conn.RemoteAddr(), p)
 			conn.Close()
 		}
 	}()
@@ -149,7 +203,7 @@ func (s *Server) handle(conn net.Conn) {
 		panic(e)
 	}
 	if head[0] != VERSION {
-		panic(head[0])
+		panic(fmt.Errorf("invalid socks version: %v", head[0]))
 	}
 
 	clientMethods := make([]byte, int(head[1]))
@@ -158,21 +212,23 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	var authenticator auth.Authenticator
+	s.authMu.RLock()
 	for i := range clientMethods {
 		if s.auths[clientMethods[i]] != nil {
 			authenticator = s.auths[clientMethods[i]]
 			break
 		}
 	}
+	s.authMu.RUnlock()
 	if authenticator == nil {
 		_, _ = conn.Write([]byte{VERSION, NOACCEPT})
-		panic(NOACCEPT)
+		panic("no accept Method")
 	}
 	if _, e := conn.Write([]byte{VERSION, authenticator.Method()}); e != nil {
 		panic(e)
 	}
 	if !authenticator.Check(conn) {
-		panic("Auth Fail")
+		panic(fmt.Errorf("method %v auth fail", authenticator.Method()))
 	}
 
 	// Handle CMD
@@ -181,7 +237,7 @@ func (s *Server) handle(conn net.Conn) {
 		panic(e)
 	}
 	if cmdHead[0] != VERSION {
-		panic(cmdHead[0])
+		panic(fmt.Errorf("invalid socks version: %v", cmdHead[0]))
 	}
 
 	req := &Request{
