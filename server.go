@@ -101,6 +101,13 @@ func (s *Server) SetAuth(a auth.Authenticator) {
 	s.authMu.Unlock()
 }
 
+// DelAuth deletes an authenticator of given method.
+func (s *Server) DelAuth(method byte) {
+	s.authMu.Lock()
+	s.auths[method] = nil
+	s.authMu.Unlock()
+}
+
 // GetAuth gets an authenticator from the server of given Method.
 // If given Method has no Authenticator, it will return nil.
 func (s *Server) GetAuth(method byte) auth.Authenticator {
@@ -176,9 +183,9 @@ func (s *Server) Stop() {
 	}
 }
 
-// Accepet returns a valid request.
+// Accept returns a valid request.
 // If the server is stopped, it will return nil.
-func (s *Server) Accepet() (req *Request) {
+func (s *Server) Accept() (req *Request) {
 	select {
 	case req = <-s.reqs:
 	case <-s.ctx.Done():
