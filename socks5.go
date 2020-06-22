@@ -5,6 +5,13 @@ package socks5
 // VERSION -> socks5
 const VERSION = 5
 
+// Method
+const (
+	NOAUTH byte = iota
+	GSSAPI
+	UAP
+)
+
 // CMD
 const (
 	_ byte = iota
