@@ -20,21 +20,20 @@
 ## Usage
 * New a `Server`
   * `Addr`: Server will listen this address.
-  * `Port`: Server will bind to this port.
-  * `AllowUDP`: If this was set to `false`, you would only get `CONNECT` requests from `(*Server).Accept()`
-  * `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/type.go#L83).
-  * `Auth`: If this was set to `true`, the Server would force clients to use Username and Password to proof their identities.
-  * `Ident`: A `map[string]string` which stores Username and Password pairs.
-  * `Logger`: An `interface{}` which implements `Log()`.
-  * `TimeOut`: The connection to the Server will timeout if its `*Request` fails to `Success` or `Fail` in `TimeOut` time.
+    * Example: `127.0.0.1:1080`
+  * `Opts`: Server options.
+    * `AllowUDP`: Server to accept `ASSOCIATE` CMD or not.
+	* `RewriteBND`: See [here](https://github.com/capric98/socks5/blob/master/server.go#L34).
+	* `Timeout`: Control timeout of a connection.
+	* `ErrChan`: Handle errors by yourself or just ignore them(set to nil).
 * `(*Server).Listen()`
-* Keep `(*Server).Accept()`, and handle every `*Request`:
+* Keep `(*Server).Accept()`, and handle every non-nil `*Request`:
   * By default, you need to implement an interface which could be converted to `net.Conn`.
   * If you'd like to handle ASSOCIATE (UDP relying) requests, you need to implement an interface which could be converted to `net.PacketConn`.
   * Use `(*Request).Success()` or `(*Request).Fail()` to handle a `*Request`.
 
 ## Example
-This is a very simple example which uses default `net.Conn` and `net.PacketConn` to handle `*Request`. Please notice that in this example, ASSOCIATE requests will be refused since `s.AllowUDP` has a default `false` value and `s.AllowUDP = true` is commented.
+This is a very simple example which uses default `net.Conn` and `net.PacketConn` to handle `*Request`.
 
 <details>
   <summary>Code</summary>
@@ -49,63 +48,53 @@ import (
 	"time"
 
 	"github.com/capric98/socks5"
+	"github.com/capric98/socks5/auth"
 )
 
 func main() {
-	s := &socks5.Server{
-		Addr: "127.0.0.1",
-		Port: 1080,
-		// For silent running, use Logger: socks5.NoLogger{}.
-		// You could also implement your Logger interface if you like :)
-	}
+	errs := make(chan error)
+	srv := socks5.NewServer("127.0.0.1:1080", &socks5.SOpts{
+		AllowUDP:   true,
+		RewriteBND: net.IPv4(127, 0, 0, 1),
+		Timeout:    10 * time.Second,
+		ErrChan:    errs,
+	})
 
-	// If you would like to require an authentication:
-	//
-	// id := make(map[string]string)
-	// id["username"] = "password!"
-	// ...
-	// s.Auth = true
-	// s.Ident = id
-	
-	// If you would like to accept UDP replying:
-	//
-	// s.AllowUDP = true
-	//
-	// Read this to know in what situation you'd
-	// like to appoint RewriteBND:
-	// https://github.com/capric98/socks5/blob/master/type.go#L83
-	// (optional) s.RewriteBND = YourPublicIP
-	
-	if e := s.Listen(); e != nil {
+	// You could also implement your own Authenticator interface.
+	srv.SetAuth(auth.NewNoAuth())
+	// Do not set NoAuth to force User&Pass auth.
+	srv.SetAuth(auth.NewUaP())
+	// You could add or delete user at any time, but
+	// be careful to set UAP first, or else you will
+	// get panic.
+	srv.GetAuth(socks5.UAP).(*auth.Uap).Add("Alice", "alice_password")
+	if e := srv.Listen(); e != nil {
 		log.Fatal(e)
 	}
-	// To stop the server: s.Shutdown()
-	
+
+	go func() {
+		for e := range errs {
+			// handle errors blabla...
+			log.Println(e)
+		}
+	}()
+
 	var DST string
 	for {
-		req := s.Accept()
-	
-		if req != nil {
+		if req := srv.Accept(); req != nil {
 			go func(req *socks5.Request) {
-				if req.ATYP == socks5.ATYPDOMAIN {
-					DST = string(req.DST_ADDR)
-				} else {
-					DST = (net.IP(req.DST_ADDR)).String()
-				}
-	
-				switch req.CMD {
+				DST = req.DST()
+				switch req.CMD() {
 				case socks5.CONNECT:
-					log.Println("CONNECT:", req.ClientAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
 					now := time.Now()
-					conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(int(req.DST_PORT)), 10*time.Second)
-					log.Println("Dial to", DST+":"+strconv.Itoa(int(req.DST_PORT)), "in", time.Since(now).String())
+					conn, err := net.DialTimeout("tcp", DST+":"+strconv.Itoa(req.DSTPort()), 30*time.Second)
+					log.Println("Dial to", DST+":"+strconv.Itoa(req.DSTPort()), "in", time.Since(now).String())
 					if err != nil {
 						req.Fail(err)
 					} else {
 						req.Success(conn)
 					}
 				case socks5.ASSOCIATE:
-					log.Println("ASSOCIATE:", req.ClientAddr(), "->", DST+":"+strconv.Itoa(int(req.DST_PORT)))
 					pl, e := net.ListenPacket("udp", ":")
 					if e != nil {
 						req.Fail(e)

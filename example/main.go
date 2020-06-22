@@ -40,7 +40,7 @@ func main() {
 
 	var DST string
 	for {
-		if req := srv.Accepet(); req != nil {
+		if req := srv.Accept(); req != nil {
 			go func(req *socks5.Request) {
 				DST = req.DST()
 				switch req.CMD() {
