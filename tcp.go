@@ -27,7 +27,8 @@ func (req *Request) connect(conn net.Conn) {
 			case <-req.ctx.Done():
 				return
 			default:
-				req.errs <- e
+				// req.errs <- e
+				// some obvious errors, ignore.
 			}
 		}
 	}()
@@ -41,7 +42,8 @@ func (req *Request) connect(conn net.Conn) {
 			case <-req.ctx.Done():
 				return
 			default:
-				req.errs <- e
+				// req.errs <- e
+				// some obvious errors, ignore.
 			}
 		}
 	}()
