@@ -5,20 +5,20 @@ import (
 	"sync"
 )
 
-type uap struct {
+type Uap struct {
 	store *sync.Map
 }
 
 // NewUaP news an user&pass authenticator.
 func NewUaP() Authenticator {
-	return &uap{store: &sync.Map{}}
+	return &Uap{store: &sync.Map{}}
 }
 
-func (a *uap) Method() byte {
-	return 1 // 1 -> Username & Password Auth
+func (a *Uap) Method() byte {
+	return 2 // 2 -> Username & Password Auth
 }
 
-func (a *uap) Check(conn net.Conn) (passed bool) {
+func (a *Uap) Check(conn net.Conn) (passed bool) {
 	defer func() {
 		if passed {
 			_, e := conn.Write([]byte{1, 0})
@@ -55,10 +55,10 @@ func (a *uap) Check(conn net.Conn) (passed bool) {
 	return true
 }
 
-func (a *uap) Add(user, pass string) {
+func (a *Uap) Add(user, pass string) {
 	a.store.Store(user, pass)
 }
 
-func (a *uap) Delete(user string) {
+func (a *Uap) Delete(user string) {
 	a.store.Delete(user)
 }
