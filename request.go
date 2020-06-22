@@ -2,134 +2,96 @@ package socks5
 
 import (
 	"context"
+	"fmt"
 	"net"
-	"strconv"
-	"time"
-
-	"github.com/pkg/errors"
 )
+
+var (
+	bufSize = 4 * 1024
+)
+
+// Request illustrate a valid socks5 request.
+type Request struct {
+	cmd, rsv, atyp byte
+
+	dstPort uint16
+	dstAddr []byte
+	clt     net.Conn
+	pconn   chan net.PacketConn // For associate only.
+
+	ctx    context.Context
+	cancel func()
+	errs   chan error
+}
 
 // Success approves the Request with an interface, the interface
 // MUST be able to be converted to a net.Conn(CONNECT) or a
 // net.PacketConn(ASSOCIATE).
-func (r *Request) Success(i interface{}) {
+func (req *Request) Success(i interface{}) {
 	if i == nil {
-		r.Fail(nil)
+		req.Fail(fmt.Errorf("nil interface of Success()"))
 	}
 
-	switch r.CMD {
+	switch req.cmd {
 	case CONNECT:
 		conn, ok := i.(net.Conn)
 		if ok {
-			r.succCONNECT(conn)
+			req.connect(conn)
 		} else {
-			r.Fail(errors.Errorf("CONNECT got %T rather than net.Conn .", i))
+			req.Fail(fmt.Errorf("got %T rather than net.Conn to approve a CONNECT", i))
 		}
 	case ASSOCIATE:
 		pl, ok := i.(net.PacketConn)
 		if ok {
-			r.succASSOCIATE(pl)
+			req.pconn <- pl
 		} else {
-			r.Fail(errors.Errorf("ASSOCIATE got %T rather than net.PacketConn .", i))
+			req.Fail(fmt.Errorf("got %T rather than net.PacketConn to approve an ASSOCIATE", i))
 		}
 	default:
-		r.Fail(errors.New("CMD(" + strconv.Itoa(int(r.CMD)) + ") unsupported."))
+		req.Fail(fmt.Errorf("unsupported CMD(%v)", req.cmd))
 	}
 }
 
 // Fail denies the Request with a given error, the server will write a response
 // of NormalFail message to the client, then close the connection.
-func (r *Request) Fail(e error) {
-	r.logger.Log(INFO, "Connection from %v failed because %v.", r.ClientAddr(), e)
+func (req *Request) Fail(e error) {
+	resp := genCMDResp(req.clt.LocalAddr())
+	resp[1] = FAIL
+	_, _ = req.clt.Write(resp)
 
-	resp := genResp(r.clt.LocalAddr())
-	resp[1] = NORMALFAIL
-	_, _ = r.clt.Write(resp)
-
-	close(r.udpAck)
-	r.cancel()
+	req.cancel()
+	req.errs <- fmt.Errorf("request from %v failed - %v", req.clt.RemoteAddr(), e)
 }
 
-// ClientAddr returns the client address of the Request.
-func (r *Request) ClientAddr() net.Addr {
-	return r.clt.RemoteAddr()
-}
-
-func (r *Request) succCONNECT(conn net.Conn) {
-	r.srv = conn
-
-	resp := genResp(r.clt.LocalAddr())
-
-	if n, e := r.clt.Write(resp); n != len(resp) || e != nil {
-		r.logger.Log(WARN, "Connection from %v was expected to write %v byte(s) and wrote %v byte(s) with err %v.", conn.RemoteAddr(), len(resp), n, e)
-		r.cancel()
-	}
-	// Cancel Deadline
-	_ = r.clt.SetDeadline(time.Time{})
-
-	r.pipe()
-}
-
-func (r *Request) succASSOCIATE(pl net.PacketConn) {
-	// Cancel Deadline
-	_ = r.clt.SetDeadline(time.Time{})
-
-	r.udpAck <- pl
-}
-
-func (r *Request) watch() {
-	go func() {
-		<-r.ctx.Done()
-		if r.srv == nil {
-			r.logger.Log(INFO, "Connection from %v was done.", r.ClientAddr())
-		} else {
-			r.logger.Log(INFO, "Connection %v -> %v was done.", r.ClientAddr(), r.srv.RemoteAddr())
-			_ = r.srv.Close()
-		}
-		_ = r.clt.Close()
-	}()
-}
-
-func (r *Request) pipe() {
-	go bufferedCopy(r.clt, r.srv, r.ctx, r.cancel)
-	go bufferedCopy(r.srv, r.clt, r.ctx, r.cancel)
-}
-
-func bufferedCopy(dst, src net.Conn, ctx context.Context, cancel func()) {
-	defer cancel()
-
-	rc := make(chan *frame, 2)
-	wc := make(chan *frame, 2)
-	rc <- &frame{b: make([]byte, 16*1024)}
-	rc <- &frame{b: make([]byte, 16*1024)}
-
-	var wn int
-	var re, we error
-	var rf, wf *frame
-
-	go func() {
-		for rf = range rc {
-			rf.n, re = src.Read(rf.b)
-			wc <- rf
-			if re != nil {
-				close(wc)
-				return
-			}
-		}
-	}()
-
-	for wf = range wc {
-		wn, we = dst.Write(wf.b[:wf.n])
-		rc <- wf
-		if we != nil || wn != wf.n {
-			close(rc)
-			return
-		}
+// DST returns a string which represents destination.
+func (req *Request) DST() string {
+	switch req.atyp {
+	case DOMAIN:
+		return string(req.dstAddr)
+	default:
+		return (net.IP(req.dstAddr)).String()
 	}
 }
 
-func genResp(iaddr net.Addr) []byte {
-	resp := []byte{VERSION, REPSUCCESS, RSV, RSV}
+// DSTPort returns destination port.
+func (req *Request) DSTPort() int {
+	return int(req.dstPort)
+}
+
+// CMD returns a byte which represents CMD type.
+func (req *Request) CMD() byte {
+	return req.cmd
+}
+
+func (req *Request) watch() {
+	go func() {
+		<-req.ctx.Done()
+		_ = req.clt.Close()
+	}()
+}
+
+func genCMDResp(iaddr net.Addr) []byte {
+	resp := []byte{VERSION, SUCC, RSV, RSV}
 
 	var laddr net.IP
 	var port uint16
@@ -144,11 +106,11 @@ func genResp(iaddr net.Addr) []byte {
 
 	if laddr.To4() != nil {
 		// laddr is an IPv4 address.
-		resp[3] = ATYPIPv4
+		resp[3] = IPV4T
 		resp = append(resp, laddr.To4()...)
 	} else {
 		// laddr is an IPv6 address.
-		resp[3] = ATYPIPv6
+		resp[3] = IPV6T
 		resp = append(resp, laddr.To16()...)
 	}
 	resp = append(resp, byte(port>>8), byte(port&0xff))
