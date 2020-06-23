@@ -111,10 +111,11 @@ func (s *Server) DelAuth(method byte) {
 
 // GetAuth gets an authenticator from the server of given Method.
 // If given Method has no Authenticator, it will return nil.
-func (s *Server) GetAuth(method byte) auth.Authenticator {
+func (s *Server) GetAuth(method byte) (a auth.Authenticator) {
 	s.authMu.RLock()
-	defer s.authMu.RUnlock()
-	return s.auths[method]
+	a = s.auths[method]
+	s.authMu.RUnlock()
+	return
 }
 
 // Listen starts a server.
