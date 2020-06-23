@@ -185,6 +185,7 @@ func (s *Server) Listen() error {
 }
 
 // Stop stops a server.
+// Stop a server before Listen() will cause panic.
 func (s *Server) Stop() {
 	s.cancel()
 	if s.cerrChan != nil {
