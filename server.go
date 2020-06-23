@@ -88,7 +88,8 @@ func NewServer(addr string, opt *SOpts) (s *Server) {
 		errs:     make(chan error, 255),
 		cerrChan: opt.ErrChan,
 	}
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	// Create cancel at Listen().
+	// s.ctx, s.cancel = context.WithCancel(context.Background())
 	return
 }
 
@@ -121,6 +122,13 @@ func (s *Server) Listen() error {
 	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return err
+	}
+
+	bctx, bcancel := context.WithCancel(context.Background())
+	s.ctx = bctx
+	s.cancel = func() {
+		bcancel()
+		l.Close()
 	}
 
 	cc := make(chan net.Conn)
