@@ -74,7 +74,7 @@ func (s *Server) associate(req *Request) {
 
 		var n int
 		var re, we error
-		var taddr net.Addr
+		var taddr, srcaddr net.Addr
 		buffer := *(bufPool.Get().(*[]byte))
 		defer func() {
 			bufPool.Put(&buffer)
@@ -87,27 +87,42 @@ func (s *Server) associate(req *Request) {
 			return
 		}
 
-		head := append([]byte{0, 0, 0}, cmdResp[3:]...)
-		headLen := len(head)
+		var head []byte
+		// headLen := len(head)
 
 		for re == nil && we == nil {
-			n, _, re = plRemote.ReadFrom(buffer)
+			n, srcaddr, re = plRemote.ReadFrom(buffer)
 			if n == 0 {
 				continue
 			}
+			if _, ok := srcaddr.(*net.UDPAddr); !ok {
+				continue
+			}
+			srcip, srcport := srcaddr.(*net.UDPAddr).IP, srcaddr.(*net.UDPAddr).Port
+			switch srcip.To4() {
+			case nil:
+				// src IPv6
+				head = append(head, []byte{0, 0, 0, IPV6T}...)
+				head = append(head, []byte(srcip)...)
+			default:
+				// src IPv4
+				head = append(head, []byte{0, 0, 0, IPV4T}...)
+				head = append(head, []byte(srcip.To4())...)
+			}
+			head = append(head, byte(srcport>>8), byte(srcport))
 
+			// append payload data
 			head = append(head, buffer[:n]...)
+
 			select {
 			case taddr = <-addrChan:
 				if taddr == nil {
-					if taddr == nil {
-						return
-					}
+					return
 				}
 			default:
 			}
 			_, we = plLocal.WriteTo(head, taddr)
-			head = head[:headLen]
+			head = head[:0]
 		}
 	}()
 
