@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	// "net/http"
@@ -13,15 +15,32 @@ import (
 	"github.com/capric98/socks5/auth"
 )
 
+var (
+	addr       string
+	allowUDP   bool
+	rewriteBND string
+)
+
+func init() {
+	flag.StringVar(&addr, "addr", "127.0.0.1:1080", "listen address")
+	flag.StringVar(&rewriteBND, "rbnd", "", "UDP rewrite address")
+	flag.BoolVar(&allowUDP, "udp", false, "allow udp proxy")
+	flag.Parse()
+
+	if rewriteBND == "" {
+		rewriteBND = strings.Split(addr, ":")[0]
+	}
+}
+
 func main() {
 	// go func() {
 	// 	log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
 	// }()
 
 	errs := make(chan error)
-	srv := socks5.NewServer("127.0.0.1:1080", &socks5.SOpts{
+	srv := socks5.NewServer(addr, &socks5.SOpts{
 		AllowUDP:   true,
-		RewriteBND: net.IPv4(127, 0, 0, 1),
+		RewriteBND: net.ParseIP(addr),
 		Timeout:    10 * time.Second,
 		ErrChan:    errs,
 	})
